@@ -1,4 +1,3 @@
-
 import { Settings, Play, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +6,8 @@ import { useState, useEffect } from "react";
 import { processingService } from "@/services/processingService";
 import { ParsedMzData } from "@/utils/mzParser";
 import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
+import { useRef } from "react";
 
 const Workflows = () => {
   const [workflowSteps, setWorkflowSteps] = useState([]);
@@ -14,11 +15,16 @@ const Workflows = () => {
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState("");
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const ms2DbFileRef = useRef<File | null>(null);
 
   // New: hold sample type and sample order for time series
   const [sampleType, setSampleType] = useState<"Serum" | "Tissue">("Serum");
   const [sampleOrder, setSampleOrder] = useState<{ fileName: string; order: number }[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<{ fileName: string }[]>([]);
+
+  const [workflowName, setWorkflowName] = useState("");
+  const [ms2DbFile, setMs2DbFile] = useState<File | null>(null);
 
   useEffect(() => {
     const handleProgress = (event: any) => {
@@ -44,7 +50,17 @@ const Workflows = () => {
     }
   }, []);
 
+  const hasFiles = !!localStorage.getItem('uploadedMzData');
+
   const handleRunWorkflow = async () => {
+    if (!workflowName.trim()) {
+      toast({
+        title: "Workflow name required",
+        description: "Please enter a workflow name before running.",
+        variant: "destructive"
+      });
+      return;
+    }
     if (workflowSteps.length === 0) {
       toast({
         title: "No workflow steps",
@@ -70,9 +86,8 @@ const Workflows = () => {
       
       const parsedData: ParsedMzData[] = JSON.parse(uploadedFilesData);
 
-      // Optionally, you can process with sampleOrder if required and "Serum"
+      // Process with sampleOrder (Serum/time series)
       if (sampleType === "Serum" && sampleOrder.length === uploadedFiles.length) {
-        // Reorder parsedData according to sampleOrder
         parsedData.sort((a, b) => {
           const orderA = sampleOrder.find(o => o.fileName === a.fileName)?.order ?? 0;
           const orderB = sampleOrder.find(o => o.fileName === b.fileName)?.order ?? 0;
@@ -85,7 +100,19 @@ const Workflows = () => {
         description: "Processing your metabolomics data...",
       });
 
-      const result = await processingService.processWorkflow(workflowSteps, parsedData);
+      // Optionally, read the MS2 DB file content and attach for identification
+      let ms2DbContent: string | null = null;
+      if (ms2DbFile) {
+        ms2DbContent = await ms2DbFile.text();
+      }
+
+      // Attach to processingService/processWorkflow as needed, here just pass as option (not yet fully implemented)
+      const result = await processingService.processWorkflow(workflowSteps, parsedData, {
+        workflowName,
+        ms2DbContent,
+        sampleType,
+        sampleOrder
+      });
       
       if (result.success) {
         toast({
@@ -113,8 +140,6 @@ const Workflows = () => {
       setCurrentStep("");
     }
   };
-
-  const hasFiles = !!localStorage.getItem('uploadedMzData');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -183,6 +208,10 @@ const Workflows = () => {
               onSampleTypeChange={setSampleType}
               sampleOrder={sampleOrder}
               onSampleOrderChange={setSampleOrder}
+              workflowName={workflowName}
+              onWorkflowNameChange={setWorkflowName}
+              ms2DbFile={ms2DbFile}
+              onMs2DbFileChange={setMs2DbFile}
             />
           </CardContent>
         </Card>

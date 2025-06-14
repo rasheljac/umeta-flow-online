@@ -13,13 +13,53 @@ interface ResultsPanelProps {
 const ResultsPanel = ({ results }: ResultsPanelProps) => {
   const { toast } = useToast();
 
+  // new: real file download functions (simulate CSV/XLSX/PDF as browser blobs)
   const handleDownload = (type: string) => {
-    toast({
-      title: "Download started",
-      description: `Downloading ${type} results...`
-    });
-    // Simulate download
-    console.log(`Downloading ${type} results`);
+    let blob: Blob | null = null;
+    let filename = "";
+    let contentType = "text/plain";
+    if (type === "peak_list") {
+      const csv = "m/z,intensity\n100,500\n101,1200\n"; // Replace with real output!
+      blob = new Blob([csv], { type: "text/csv" });
+      filename = "peak_list.csv";
+      contentType = "text/csv";
+    } else if (type === "compound_list") {
+      const xlsxMock = "Compound\tFormula\tScore\nGlucose\tC6H12O6\t97\n"; // Replace with real output!
+      blob = new Blob([xlsxMock], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      filename = "compound_list.xlsx";
+      contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    } else if (type === "statistics") {
+      const csv = "Feature,FoldChange,p-value\nA,2.2,0.01\nB,0.8,0.22\n";
+      blob = new Blob([csv], { type: "text/csv" });
+      filename = "statistics.csv";
+      contentType = "text/csv";
+    } else if (type === "qc_report") {
+      const pdfBlob = new Blob(["Quality control report PDF mock"], { type: "application/pdf" });
+      blob = pdfBlob;
+      filename = "qc_report.pdf";
+      contentType = "application/pdf";
+    } else if (type === "complete_package") {
+      // Create a zip mock (text file)
+      blob = new Blob(["Results package archive mock"], { type: "application/zip" });
+      filename = "full_results.zip";
+      contentType = "application/zip";
+    }
+    if (blob) {
+      toast({
+        title: "Download started",
+        description: `Downloading ${filename}...`
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    }
   };
 
   if (!results || !results.processed) {

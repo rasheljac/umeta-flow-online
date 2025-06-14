@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Plus, Settings, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { useState, useEffect, ChangeEvent } from "react";
+import { Plus, Settings, Trash2, ChevronDown, ChevronRight, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { useToast } from "@/hooks/use-toast";
 
 interface WorkflowStep {
   id: string;
@@ -25,11 +26,15 @@ interface WorkflowBuilderProps {
   steps: WorkflowStep[];
   onStepsChange: (steps: WorkflowStep[]) => void;
   hasFiles: boolean;
-  uploadedFiles?: { fileName: string }[]; // Optional: for ordering
+  uploadedFiles?: { fileName: string }[];
   sampleType: "Serum" | "Tissue";
   onSampleTypeChange: (value: "Serum" | "Tissue") => void;
   sampleOrder: SampleOrder[];
   onSampleOrderChange: (order: SampleOrder[]) => void;
+  workflowName: string;
+  onWorkflowNameChange: (name: string) => void;
+  ms2DbFile: File | null;
+  onMs2DbFileChange: (file: File | null) => void;
 }
 
 const availableSteps = [
@@ -98,11 +103,15 @@ const WorkflowBuilder = ({
   sampleType,
   onSampleTypeChange,
   sampleOrder,
-  onSampleOrderChange
+  onSampleOrderChange,
+  workflowName,
+  onWorkflowNameChange,
+  ms2DbFile,
+  onMs2DbFileChange
 }: WorkflowBuilderProps) => {
   const [selectedStepType, setSelectedStepType] = useState("");
+  const { toast } = useToast();
 
-  // If files change, reset order
   useEffect(() => {
     if (!uploadedFiles.length) return;
     if (sampleOrder.length !== uploadedFiles.length) {
@@ -112,12 +121,10 @@ const WorkflowBuilder = ({
       }));
       onSampleOrderChange(initialOrder);
     }
-    // eslint-disable-next-line
   }, [uploadedFiles.length]);
 
   const addStep = () => {
     if (!selectedStepType) return;
-
     const stepTemplate = availableSteps.find(s => s.type === selectedStepType);
     if (!stepTemplate) return;
 
@@ -163,7 +170,23 @@ const WorkflowBuilder = ({
     onStepsChange(updatedSteps);
   };
 
+  // New: handle mz_tolerance as free text/numeric input for identification step
   const renderParameterInput = (step: WorkflowStep, paramName: string, paramValue: any) => {
+    if (step.type === "identification" && paramName === "mass_tolerance") {
+      return (
+        <div className="space-y-2">
+          <Label htmlFor={`${step.id}_${paramName}`}>m/z tolerance</Label>
+          <Input
+            id={`${step.id}_${paramName}`}
+            type="number"
+            step="0.0001"
+            min={0}
+            value={paramValue}
+            onChange={e => updateStepParameter(step.id, paramName, parseFloat(e.target.value))}
+          />
+        </div>
+      );
+    }
     if (typeof paramValue === 'number') {
       if (paramName.includes('threshold') || paramName.includes('tolerance')) {
         return (
@@ -205,7 +228,7 @@ const WorkflowBuilder = ({
           test_type: ['t_test', 'wilcoxon', 'anova'],
           reference_method: ['internal_standard', 'total_intensity', 'median']
         };
-        
+
         return (
           <div className="space-y-2">
             <Label>{paramName.replace(/_/g, ' ')}</Label>
@@ -242,12 +265,11 @@ const WorkflowBuilder = ({
     return null;
   };
 
-  // --- Render Sample Type Selection and Sample Order (if Serum + Timeseries) ---
   const renderSampleTypeControl = () => (
     <div className="flex flex-col md:flex-row gap-4 md:items-end mt-2 mb-4">
       <div>
         <Label htmlFor="sample-type">Sample Type</Label>
-        <Select 
+        <Select
           value={sampleType}
           onValueChange={v => onSampleTypeChange(v as "Serum" | "Tissue")}
         >
@@ -297,17 +319,54 @@ const WorkflowBuilder = ({
     );
   };
 
+  // NEW: workflow name input and ms2 db upload
+  const handleDbFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      onMs2DbFileChange(event.target.files[0]);
+    } else {
+      onMs2DbFileChange(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {!hasFiles && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <p className="text-amber-800 text-sm">
-            ⚠️ Please upload data files first before building your workflow.
-          </p>
-        </div>
-      )}
+      {/* Workflow Name */}
+      <div className="mb-2">
+        <Label htmlFor="workflow-name" className="mb-1 block font-bold">
+          Workflow Name
+          <span className="text-red-600">*</span>
+        </Label>
+        <Input
+          id="workflow-name"
+          value={workflowName}
+          onChange={e => onWorkflowNameChange(e.target.value)}
+          placeholder="Give your workflow a name"
+          required
+          className="w-full md:w-72"
+          maxLength={80}
+        />
+      </div>
 
-      {/* Serum/Tissue sample type */}
+      {/* Compound MS2 DB upload */}
+      <div>
+        <Label htmlFor="ms2db-upload" className="mb-1 block font-bold">Compound Database (MS2, for spectral matching)</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="ms2db-upload"
+            type="file"
+            accept=".json,.msp,.mgf"
+            className="w-auto"
+            onChange={handleDbFileChange}
+            disabled={!hasFiles}
+          />
+          {ms2DbFile &&
+            <span className="text-xs text-green-700">{ms2DbFile.name}</span>
+          }
+        </div>
+        <span className="text-xs text-slate-500">Supported: .json, .mgf, .msp</span>
+      </div>
+
+      {/* Sample type and ordering */}
       {renderSampleTypeControl()}
       {renderSampleOrderControl()}
 
@@ -331,8 +390,8 @@ const WorkflowBuilder = ({
             </SelectContent>
           </Select>
         </div>
-        <Button 
-          onClick={addStep} 
+        <Button
+          onClick={addStep}
           disabled={!selectedStepType || !hasFiles}
           className="bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700"
         >
@@ -410,3 +469,5 @@ const WorkflowBuilder = ({
 };
 
 export default WorkflowBuilder;
+
+// NOTE: This file is getting long and should be refactored into subcomponents soon!
