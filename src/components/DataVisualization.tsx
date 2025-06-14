@@ -1,9 +1,13 @@
-import { useState } from "react";
+
+import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TrendingUp, BarChart3, PieChart as PieChartIcon, Target } from "lucide-react";
+import { TrendingUp, BarChart3, PieChart as PieChartIcon, Target, Zap, Clock } from "lucide-react";
+import MassSpectrumViewer from "./MassSpectrumViewer";
+import ChromatogramViewer from "./ChromatogramViewer";
+import { ParsedMzData } from "@/utils/mzParser";
 
 interface DataVisualizationProps {
   results: any;
@@ -47,7 +51,21 @@ const generateMockData = () => {
 
 const DataVisualization = ({ results }: DataVisualizationProps) => {
   const [selectedChart, setSelectedChart] = useState("intensity");
+  const [uploadedData, setUploadedData] = useState<ParsedMzData[]>([]);
   const mockData = generateMockData();
+
+  useEffect(() => {
+    // Load uploaded mzML/mzXML data for visualization
+    const storedData = localStorage.getItem('uploadedMzData');
+    if (storedData) {
+      try {
+        const parsed = JSON.parse(storedData);
+        setUploadedData(parsed);
+      } catch (error) {
+        console.error('Failed to load uploaded data:', error);
+      }
+    }
+  }, []);
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
 
@@ -70,6 +88,8 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="spectra">Mass Spectra</SelectItem>
+            <SelectItem value="chromatograms">Chromatograms</SelectItem>
             <SelectItem value="intensity">Compound Intensities</SelectItem>
             <SelectItem value="pca">PCA Analysis</SelectItem>
             <SelectItem value="pathway">Pathway Enrichment</SelectItem>
@@ -79,7 +99,15 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
       </div>
 
       <Tabs value={selectedChart} onValueChange={setSelectedChart}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-6">
+          <TabsTrigger value="spectra">
+            <Zap className="w-4 h-4 mr-2" />
+            Mass Spectra
+          </TabsTrigger>
+          <TabsTrigger value="chromatograms">
+            <Clock className="w-4 h-4 mr-2" />
+            Chromatograms
+          </TabsTrigger>
           <TabsTrigger value="intensity">
             <BarChart3 className="w-4 h-4 mr-2" />
             Intensities
@@ -97,6 +125,28 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
             Time Series
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="spectra">
+          <Card>
+            <CardHeader>
+              <CardTitle>Mass Spectrum Viewer</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <MassSpectrumViewer data={uploadedData} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="chromatograms">
+          <Card>
+            <CardHeader>
+              <CardTitle>Chromatogram Viewer</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ChromatogramViewer data={uploadedData} />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="intensity">
           <Card>

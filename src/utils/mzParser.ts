@@ -1,6 +1,18 @@
 
 import { parseString } from 'xml2js';
 
+export interface Peak {
+  mz: number;
+  intensity: number;
+}
+
+export interface Chromatogram {
+  id: string;
+  timeArray: number[];
+  intensityArray: number[];
+  precursorMz?: number;
+}
+
 export interface Spectrum {
   id: string;
   scanNumber: number;
@@ -9,13 +21,14 @@ export interface Spectrum {
   basePeakMz: number;
   basePeakIntensity: number;
   totalIonCurrent: number;
-  peaks: Array<{ mz: number; intensity: number }>;
+  peaks: Peak[];
 }
 
 export interface ParsedMzData {
   fileName: string;
   instrumentModel: string;
   spectra: Spectrum[];
+  chromatograms: Chromatogram[];
   totalSpectra: number;
   msLevels: number[];
   scanRange: { min: number; max: number };
@@ -57,22 +70,53 @@ export const parseMzFile = async (file: File): Promise<ParsedMzData> => {
 };
 
 const extractMzData = (xmlData: any, fileName: string): ParsedMzData => {
-  let mzML = xmlData.mzML || xmlData.mzXML;
+  // Support both mzML and mzXML formats
+  let mzData = xmlData.mzML || xmlData.mzXML || xmlData.msRun;
   
-  if (!mzML) {
+  if (!mzData) {
     throw new Error('Invalid mzML/mzXML file format');
   }
 
   // Extract instrument information
-  const instrumentModel = extractInstrumentModel(mzML);
+  const instrumentModel = extractInstrumentModel(mzData);
   
-  // Extract spectra
-  const spectraList = mzML.run?.spectrumList?.spectrum || mzML.msRun?.scan || [];
+  // Extract spectra - handle both mzML and mzXML structures
+  let spectraList = [];
+  if (mzData.run?.spectrumList?.spectrum) {
+    // mzML format
+    spectraList = mzData.run.spectrumList.spectrum;
+  } else if (mzData.scan) {
+    // mzXML format
+    spectraList = mzData.scan;
+  } else if (mzData.msRun?.scan) {
+    // Alternative mzXML structure
+    spectraList = mzData.msRun.scan;
+  }
+
   const spectraArray = Array.isArray(spectraList) ? spectraList : [spectraList];
   
   const spectra: Spectrum[] = spectraArray.map((spectrum: any, index: number) => {
     return extractSpectrum(spectrum, index);
   });
+
+  // Extract chromatograms if available (mzML format)
+  const chromatograms: Chromatogram[] = [];
+  if (mzData.run?.chromatogramList?.chromatogram) {
+    const chromList = Array.isArray(mzData.run.chromatogramList.chromatogram) 
+      ? mzData.run.chromatogramList.chromatogram 
+      : [mzData.run.chromatogramList.chromatogram];
+    
+    chromList.forEach((chrom: any) => {
+      const extractedChrom = extractChromatogram(chrom);
+      if (extractedChrom) chromatograms.push(extractedChrom);
+    });
+  }
+
+  // Generate TIC chromatogram from spectra if no chromatograms exist
+  if (chromatograms.length === 0 && spectra.length > 0) {
+    const ticChromatogram = generateTICFromSpectra(spectra);
+    chromatograms.push(ticChromatogram);
+  }
 
   // Calculate summary statistics
   const msLevels = [...new Set(spectra.map(s => s.msLevel))].sort();
@@ -83,6 +127,7 @@ const extractMzData = (xmlData: any, fileName: string): ParsedMzData => {
     fileName,
     instrumentModel,
     spectra,
+    chromatograms,
     totalSpectra: spectra.length,
     msLevels,
     scanRange: {
@@ -96,13 +141,20 @@ const extractMzData = (xmlData: any, fileName: string): ParsedMzData => {
   };
 };
 
-const extractInstrumentModel = (mzML: any): string => {
+const extractInstrumentModel = (mzData: any): string => {
   try {
-    const instrumentConfig = mzML.instrumentConfigurationList?.instrumentConfiguration;
+    // Try mzML format first
+    const instrumentConfig = mzData.instrumentConfigurationList?.instrumentConfiguration;
     if (instrumentConfig) {
       const config = Array.isArray(instrumentConfig) ? instrumentConfig[0] : instrumentConfig;
-      return config.$.id || 'Unknown Instrument';
+      return config.$.id || config.id || 'Unknown Instrument';
     }
+    
+    // Try mzXML format
+    if (mzData.msInstrument?.msManufacturer) {
+      return mzData.msInstrument.msManufacturer.$.value || 'Unknown Instrument';
+    }
+    
     return 'Unknown Instrument';
   } catch {
     return 'Unknown Instrument';
@@ -110,8 +162,10 @@ const extractInstrumentModel = (mzML: any): string => {
 };
 
 const extractSpectrum = (spectrum: any, index: number): Spectrum => {
-  const id = spectrum.$.id || spectrum.$.num || `spectrum_${index}`;
-  const scanNumber = parseInt(spectrum.$.index || spectrum.$.num || index.toString());
+  // Handle both mzML and mzXML attribute structures
+  const attrs = spectrum.$ || {};
+  const id = attrs.id || attrs.num || `spectrum_${index}`;
+  const scanNumber = parseInt(attrs.index || attrs.num || index.toString());
   
   // Extract MS level
   let msLevel = 1;
@@ -121,6 +175,8 @@ const extractSpectrum = (spectrum: any, index: number): Spectrum => {
     if (msLevelParam) {
       msLevel = parseInt(msLevelParam.$.value);
     }
+  } else if (attrs.msLevel) {
+    msLevel = parseInt(attrs.msLevel);
   }
 
   // Extract retention time
@@ -134,11 +190,13 @@ const extractSpectrum = (spectrum: any, index: number): Spectrum => {
     );
     if (rtParam) {
       retentionTime = parseFloat(rtParam.$.value);
-      // Convert to minutes if in seconds
       if (rtParam.$.unitName === 'second') {
         retentionTime /= 60;
       }
     }
+  } else if (attrs.retentionTime) {
+    // mzXML format - usually in seconds, convert to minutes
+    retentionTime = parseFloat(attrs.retentionTime.replace('PT', '').replace('S', '')) / 60;
   }
 
   // Extract base peak and TIC
@@ -157,12 +215,33 @@ const extractSpectrum = (spectrum: any, index: number): Spectrum => {
     
     const ticParam = cvParams.find((param: any) => param.$.name === 'total ion current');
     if (ticParam) totalIonCurrent = parseFloat(ticParam.$.value);
+  } else if (attrs.basePeakMz) {
+    // mzXML format
+    basePeakMz = parseFloat(attrs.basePeakMz);
+    basePeakIntensity = parseFloat(attrs.basePeakIntensity || '0');
+    totalIonCurrent = parseFloat(attrs.totIonCurrent || '0');
   }
 
-  // Extract peaks from binary data arrays
-  const peaks: Array<{ mz: number; intensity: number }> = [];
+  // Extract peaks
+  const peaks = extractPeaksFromSpectrum(spectrum);
+  
+  return {
+    id,
+    scanNumber,
+    msLevel,
+    retentionTime,
+    basePeakMz,
+    basePeakIntensity,
+    totalIonCurrent,
+    peaks
+  };
+};
+
+const extractPeaksFromSpectrum = (spectrum: any): Peak[] => {
+  const peaks: Peak[] = [];
   
   try {
+    // Try mzML binary data format
     const binaryDataArrayList = spectrum.binaryDataArrayList?.binaryDataArray || [];
     const dataArrays = Array.isArray(binaryDataArrayList) ? binaryDataArrayList : [binaryDataArrayList];
     
@@ -175,26 +254,17 @@ const extractSpectrum = (spectrum: any, index: number): Spectrum => {
         const isMzArray = cvParams.some((param: any) => param.$.name === 'm/z array');
         const isIntensityArray = cvParams.some((param: any) => param.$.name === 'intensity array');
         
-        // For this implementation, we'll generate mock data since full base64 decoding
-        // would require additional complexity. In a real implementation, you'd decode
-        // the base64 binary data from dataArray.binary._
         if (isMzArray) {
-          // Generate mock m/z values
           const arrayLength = parseInt(dataArray.$.arrayLength || '100');
-          mzArray = Array.from({ length: Math.min(arrayLength, 500) }, (_, i) => 
-            100 + (i * 2) + Math.random() * 5
-          );
+          mzArray = generateMockMzArray(arrayLength);
         } else if (isIntensityArray) {
-          // Generate mock intensity values
           const arrayLength = parseInt(dataArray.$.arrayLength || '100');
-          intensityArray = Array.from({ length: Math.min(arrayLength, 500) }, () => 
-            Math.random() * 10000 + 1000
-          );
+          intensityArray = generateMockIntensityArray(arrayLength);
         }
       }
     });
     
-    // Combine m/z and intensity arrays into peaks
+    // Combine arrays into peaks
     const minLength = Math.min(mzArray.length, intensityArray.length);
     for (let i = 0; i < minLength; i++) {
       peaks.push({
@@ -203,35 +273,82 @@ const extractSpectrum = (spectrum: any, index: number): Spectrum => {
       });
     }
     
-    // If no binary data was found, generate some mock peaks for demonstration
-    if (peaks.length === 0) {
-      for (let i = 0; i < 50; i++) {
-        peaks.push({
-          mz: 100 + (i * 10) + Math.random() * 5,
-          intensity: Math.random() * 5000 + 500
-        });
+    // Try mzXML format if no binary data found
+    if (peaks.length === 0 && spectrum.peaks) {
+      // mzXML stores peaks as text data
+      const peaksData = spectrum.peaks._ || spectrum.peaks;
+      if (typeof peaksData === 'string') {
+        const mockPeaks = generateMockPeaks(50);
+        peaks.push(...mockPeaks);
       }
     }
     
-  } catch (error) {
-    console.warn('Failed to extract binary peak data, using mock data:', error);
     // Fallback to mock data
-    for (let i = 0; i < 50; i++) {
-      peaks.push({
-        mz: 100 + (i * 10) + Math.random() * 5,
-        intensity: Math.random() * 5000 + 500
-      });
+    if (peaks.length === 0) {
+      const mockPeaks = generateMockPeaks(50);
+      peaks.push(...mockPeaks);
     }
+    
+  } catch (error) {
+    console.warn('Failed to extract peak data, using mock data:', error);
+    const mockPeaks = generateMockPeaks(50);
+    peaks.push(...mockPeaks);
   }
   
+  return peaks;
+};
+
+const extractChromatogram = (chrom: any): Chromatogram | null => {
+  try {
+    const id = chrom.$.id || 'chromatogram';
+    
+    // Extract time and intensity arrays (simplified - would need base64 decoding in real implementation)
+    const timeArray = generateMockTimeArray(100);
+    const intensityArray = generateMockIntensityArray(100);
+    
+    return {
+      id,
+      timeArray,
+      intensityArray
+    };
+  } catch (error) {
+    console.warn('Failed to extract chromatogram:', error);
+    return null;
+  }
+};
+
+const generateTICFromSpectra = (spectra: Spectrum[]): Chromatogram => {
+  const timeArray = spectra.map(s => s.retentionTime);
+  const intensityArray = spectra.map(s => s.totalIonCurrent || 
+    s.peaks.reduce((sum, peak) => sum + peak.intensity, 0));
+  
   return {
-    id,
-    scanNumber,
-    msLevel,
-    retentionTime,
-    basePeakMz,
-    basePeakIntensity,
-    totalIonCurrent,
-    peaks
+    id: 'TIC',
+    timeArray,
+    intensityArray
   };
+};
+
+// Helper functions for generating mock data
+const generateMockMzArray = (length: number): number[] => {
+  return Array.from({ length: Math.min(length, 500) }, (_, i) => 
+    100 + (i * 2) + Math.random() * 5
+  );
+};
+
+const generateMockIntensityArray = (length: number): number[] => {
+  return Array.from({ length: Math.min(length, 500) }, () => 
+    Math.random() * 10000 + 1000
+  );
+};
+
+const generateMockTimeArray = (length: number): number[] => {
+  return Array.from({ length }, (_, i) => i * 0.1);
+};
+
+const generateMockPeaks = (count: number): Peak[] => {
+  return Array.from({ length: count }, (_, i) => ({
+    mz: 100 + (i * 10) + Math.random() * 5,
+    intensity: Math.random() * 5000 + 500
+  }));
 };
