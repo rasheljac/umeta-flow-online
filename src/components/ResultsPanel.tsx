@@ -142,11 +142,11 @@ const ResultsPanel = ({ results }: ResultsPanelProps) => {
               <Badge variant="secondary">{Math.floor(results.peaksDetected * 0.15)}</Badge>
             </div>
             <div className="flex justify-between items-center">
-              <span>Fold Change > 2</span>
+              <span>Fold Change &gt; 2</span>
               <Badge variant="secondary">{Math.floor(results.peaksDetected * 0.08)}</Badge>
             </div>
             <div className="flex justify-between items-center">
-              <span>p-value < 0.05</span>
+              <span>p-value &lt; 0.05</span>
               <Badge variant="secondary">{Math.floor(results.peaksDetected * 0.12)}</Badge>
             </div>
             <Separator />
@@ -175,12 +175,12 @@ const ResultsPanel = ({ results }: ResultsPanelProps) => {
               <Badge variant="default" className="bg-green-600">Pass</Badge>
             </div>
             <div className="flex justify-between items-center">
-              <span>CV < 30% Features</span>
+              <span>CV &lt; 30% Features</span>
               <Badge variant="secondary">87%</Badge>
             </div>
             <div className="flex justify-between items-center">
               <span>Missing Values</span>
-              <Badge variant="secondary">< 5%</Badge>
+              <Badge variant="secondary">&lt; 5%</Badge>
             </div>
             <Separator />
             <Button 
