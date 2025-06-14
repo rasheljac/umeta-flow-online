@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Upload, Play, BarChart3, Settings, FileText, Zap, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,9 +47,9 @@ const Index = () => {
               <h1 className="text-xl font-bold text-slate-900">MetaFlow Analyzer</h1>
             </div>
             <nav className="hidden md:flex space-x-8">
-              <a href="#" className="text-slate-600 hover:text-slate-900 font-medium">Dashboard</a>
-              <a href="#" className="text-slate-600 hover:text-slate-900 font-medium">Workflows</a>
-              <a href="#" className="text-slate-600 hover:text-slate-900 font-medium">Results</a>
+              <Link to="/" className="text-slate-600 hover:text-slate-900 font-medium">Dashboard</Link>
+              <Link to="/workflows" className="text-slate-600 hover:text-slate-900 font-medium">Workflows</Link>
+              <Link to="/results" className="text-slate-600 hover:text-slate-900 font-medium">Results</Link>
               <a href="#" className="text-slate-600 hover:text-slate-900 font-medium">Help</a>
             </nav>
           </div>

@@ -1,18 +1,24 @@
-
 import { useState, useCallback } from "react";
-import { Upload, File, X, CheckCircle } from "lucide-react";
+import { Upload, File, X, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
+import { parseMzFile, ParsedMzData } from "@/utils/mzParser";
+
+interface ProcessedFile extends File {
+  parsedData?: ParsedMzData;
+  parseError?: string;
+}
 
 interface FileUploadProps {
-  onFileUpload: (files: File[]) => void;
+  onFileUpload: (files: ProcessedFile[]) => void;
 }
 
 const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   const [dragActive, setDragActive] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<ProcessedFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
+  const [parseProgress, setParseProgress] = useState<{ [key: string]: boolean }>({});
   const { toast } = useToast();
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -39,7 +45,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
     handleFiles(files);
   };
 
-  const handleFiles = (files: File[]) => {
+  const handleFiles = async (files: File[]) => {
     const validFiles = files.filter(file => {
       const validTypes = ['.mzml', '.mzxml', '.csv', '.txt', '.xlsx'];
       const extension = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -55,25 +61,84 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
     }
 
     if (validFiles.length > 0) {
-      // Simulate upload progress
-      validFiles.forEach(file => {
+      const processedFiles: ProcessedFile[] = [];
+
+      for (const file of validFiles) {
+        // Simulate upload progress
         let progress = 0;
         const interval = setInterval(() => {
           progress += Math.random() * 30;
           if (progress >= 100) {
             progress = 100;
             clearInterval(interval);
+            
+            // Start parsing if it's an mz file
+            if (file.name.toLowerCase().includes('mz')) {
+              setParseProgress(prev => ({ ...prev, [file.name]: true }));
+              parseMzFileData(file, processedFiles);
+            }
           }
           setUploadProgress(prev => ({ ...prev, [file.name]: progress }));
         }, 200);
-      });
 
-      setUploadedFiles(prev => [...prev, ...validFiles]);
-      onFileUpload([...uploadedFiles, ...validFiles]);
+        processedFiles.push(file as ProcessedFile);
+      }
+
+      setUploadedFiles(prev => [...prev, ...processedFiles]);
 
       toast({
         title: "Files uploaded successfully",
         description: `${validFiles.length} file(s) ready for processing.`
+      });
+    }
+  };
+
+  const parseMzFileData = async (file: File, processedFiles: ProcessedFile[]) => {
+    try {
+      console.log(`Starting to parse ${file.name}...`);
+      const parsedData = await parseMzFile(file);
+      
+      // Update the file with parsed data
+      const fileIndex = processedFiles.findIndex(f => f.name === file.name);
+      if (fileIndex !== -1) {
+        processedFiles[fileIndex].parsedData = parsedData;
+      }
+
+      setUploadedFiles(prev => {
+        const updated = prev.map(f => 
+          f.name === file.name ? { ...f, parsedData } : f
+        );
+        onFileUpload(updated);
+        return updated;
+      });
+
+      setParseProgress(prev => ({ ...prev, [file.name]: false }));
+
+      toast({
+        title: "File parsed successfully",
+        description: `${file.name}: Found ${parsedData.totalSpectra} spectra`
+      });
+
+      console.log(`Parsed ${file.name}:`, parsedData);
+    } catch (error) {
+      console.error(`Error parsing ${file.name}:`, error);
+      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown parsing error';
+      
+      setUploadedFiles(prev => {
+        const updated = prev.map(f => 
+          f.name === file.name ? { ...f, parseError: errorMessage } : f
+        );
+        onFileUpload(updated);
+        return updated;
+      });
+
+      setParseProgress(prev => ({ ...prev, [file.name]: false }));
+
+      toast({
+        title: "Parsing failed",
+        description: `${file.name}: ${errorMessage}`,
+        variant: "destructive"
       });
     }
   };
@@ -147,6 +212,14 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
                 <div>
                   <p className="font-medium text-slate-900">{file.name}</p>
                   <p className="text-sm text-slate-600">{formatFileSize(file.size)}</p>
+                  {file.parsedData && (
+                    <p className="text-xs text-green-600">
+                      Parsed: {file.parsedData.totalSpectra} spectra, MS levels {file.parsedData.msLevels.join(', ')}
+                    </p>
+                  )}
+                  {file.parseError && (
+                    <p className="text-xs text-red-600">Parse error: {file.parseError}</p>
+                  )}
                 </div>
               </div>
               <div className="flex items-center space-x-3">
@@ -154,6 +227,13 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
                   <div className="w-24">
                     <Progress value={uploadProgress[file.name]} className="h-2" />
                   </div>
+                ) : parseProgress[file.name] ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-xs text-blue-600">Parsing...</span>
+                  </div>
+                ) : file.parseError ? (
+                  <AlertCircle className="w-5 h-5 text-red-500" />
                 ) : (
                   <CheckCircle className="w-5 h-5 text-green-500" />
                 )}
