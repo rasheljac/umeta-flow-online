@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from "react";
 import { Upload, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
@@ -33,15 +34,23 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
 
     if (error) {
       console.error('Storage upload error:', error);
+      toast({
+        title: "Storage upload failed",
+        description: `Failed to upload ${file.name}: ${error.message}`,
+        variant: "destructive"
+      });
       return null;
     }
 
+    console.log('File uploaded to storage:', data.path);
     return data.path;
   };
 
   const saveSampleToDatabase = async (parsedData: ParsedMzData, filePath: string, fileSize: number) => {
     if (!user) return null;
 
+    console.log('Saving sample to database:', parsedData.fileName);
+    
     const { data: sample, error: sampleError } = await supabase
       .from('samples')
       .insert({
@@ -61,11 +70,20 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
 
     if (sampleError) {
       console.error('Sample insert error:', sampleError);
+      toast({
+        title: "Database error",
+        description: `Failed to save sample: ${sampleError.message}`,
+        variant: "destructive"
+      });
       return null;
     }
 
+    console.log('Sample saved with ID:', sample.id);
+
     // Save spectra
     if (parsedData.spectra.length > 0) {
+      console.log(`Saving ${parsedData.spectra.length} spectra...`);
+      
       const spectraToInsert = parsedData.spectra.map(spectrum => ({
         sample_id: sample.id,
         scan_number: spectrum.scanNumber,
@@ -83,11 +101,20 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
 
       if (spectraError) {
         console.error('Spectra insert error:', spectraError);
+        toast({
+          title: "Database error",
+          description: `Failed to save spectra: ${spectraError.message}`,
+          variant: "destructive"
+        });
+      } else {
+        console.log('Spectra saved successfully');
       }
     }
 
     // Save chromatograms
     if (parsedData.chromatograms.length > 0) {
+      console.log(`Saving ${parsedData.chromatograms.length} chromatograms...`);
+      
       const chromatogramsToInsert = parsedData.chromatograms.map(chrom => ({
         sample_id: sample.id,
         chromatogram_id: chrom.id,
@@ -102,6 +129,13 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
 
       if (chromError) {
         console.error('Chromatograms insert error:', chromError);
+        toast({
+          title: "Database error",
+          description: `Failed to save chromatograms: ${chromError.message}`,
+          variant: "destructive"
+        });
+      } else {
+        console.log('Chromatograms saved successfully');
       }
     }
 
@@ -111,6 +145,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   const handleFileUpload = async (files: File[]) => {
     if (files.length === 0 || !user) return;
 
+    console.log(`Starting upload of ${files.length} files...`);
     setIsProcessing(true);
     setParsingProgress(0);
     setParsedData([]);
@@ -120,22 +155,37 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
         
         try {
           // Parse the file
+          console.log('Parsing file...');
           const parsed = await parseMzFile(file);
+          console.log('File parsed successfully:', {
+            spectra: parsed.totalSpectra,
+            chromatograms: parsed.chromatograms.length
+          });
+          
           newParsedData.push(parsed);
           
           // Upload to storage
+          console.log('Uploading to storage...');
           const filePath = await uploadFileToStorage(file);
+          
           if (filePath) {
             // Save to database
+            console.log('Saving to database...');
             await saveSampleToDatabase(parsed, filePath, file.size);
           }
           
           setParsingProgress(((i + 1) / files.length) * 100);
         } catch (error) {
           console.error(`Failed to process ${file.name}:`, error);
+          toast({
+            title: "File processing failed",
+            description: `Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            variant: "destructive"
+          });
         }
       }
 
@@ -164,9 +214,10 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   };
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
+    console.log('Files dropped:', acceptedFiles.map(f => f.name));
     setFiles(acceptedFiles);
     handleFileUpload(acceptedFiles);
-  }, [user, handleFileUpload]);
+  }, [user]);
 
   const {getRootProps, getInputProps, isDragActive} = useDropzone({
     onDrop,
@@ -233,6 +284,17 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {parsedData.length > 0 && (
+        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-md">
+          <h3 className="font-medium text-green-800 mb-2">Upload Summary</h3>
+          <div className="text-sm text-green-700">
+            <p>Files processed: {parsedData.length}</p>
+            <p>Total spectra: {parsedData.reduce((sum, data) => sum + data.totalSpectra, 0)}</p>
+            <p>Total chromatograms: {parsedData.reduce((sum, data) => sum + data.chromatograms.length, 0)}</p>
+          </div>
         </div>
       )}
     </div>
