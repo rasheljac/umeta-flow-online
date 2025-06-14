@@ -41,7 +41,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
 
   const handleFiles = (files: File[]) => {
     const validFiles = files.filter(file => {
-      const validTypes = ['.mzml', '.csv', '.txt', '.xlsx'];
+      const validTypes = ['.mzml', '.mzxml', '.csv', '.txt', '.xlsx'];
       const extension = '.' + file.name.split('.').pop()?.toLowerCase();
       return validTypes.includes(extension);
     });
@@ -49,7 +49,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
     if (validFiles.length !== files.length) {
       toast({
         title: "Invalid file type",
-        description: "Please upload mzML, CSV, TXT, or XLSX files only.",
+        description: "Please upload mzML, mzXML, CSV, TXT, or XLSX files only.",
         variant: "destructive"
       });
     }
@@ -119,12 +119,12 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
           Drag and drop files here, or click to browse
         </p>
         <p className="text-sm text-slate-500 mb-4">
-          Supported formats: mzML, CSV, TXT, XLSX
+          Supported formats: mzML, mzXML, CSV, TXT, XLSX
         </p>
         <input
           type="file"
           multiple
-          accept=".mzml,.csv,.txt,.xlsx"
+          accept=".mzml,.mzxml,.csv,.txt,.xlsx"
           onChange={handleFileInput}
           className="hidden"
           id="file-upload"
