@@ -1,10 +1,9 @@
-
 import { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TrendingUp, BarChart3, PieChart as PieChartIcon, Scatter3D } from "lucide-react";
+import { TrendingUp, BarChart3, PieChart as PieChartIcon, Scatter as ScatterIcon } from "lucide-react";
 
 interface DataVisualizationProps {
   results: any;
@@ -86,7 +85,7 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
             Intensities
           </TabsTrigger>
           <TabsTrigger value="pca">
-            <Scatter3D className="w-4 h-4 mr-2" />
+            <ScatterIcon className="w-4 h-4 mr-2" />
             PCA
           </TabsTrigger>
           <TabsTrigger value="pathway">
