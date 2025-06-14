@@ -3,14 +3,91 @@ import { Settings, Play, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import WorkflowBuilder from "@/components/WorkflowBuilder";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { processingService } from "@/services/processingService";
+import { ParsedMzData } from "@/utils/mzParser";
+import { useToast } from "@/hooks/use-toast";
 
 const Workflows = () => {
   const [workflowSteps, setWorkflowSteps] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState("");
+  const { toast } = useToast();
 
-  const handleRunWorkflow = () => {
-    console.log("Running workflow with steps:", workflowSteps);
+  useEffect(() => {
+    const handleProgress = (event: any) => {
+      setProgress(event.detail.progress);
+      setCurrentStep(event.detail.currentStep);
+    };
+
+    window.addEventListener('workflow-progress', handleProgress);
+    return () => window.removeEventListener('workflow-progress', handleProgress);
+  }, []);
+
+  const handleRunWorkflow = async () => {
+    if (workflowSteps.length === 0) {
+      toast({
+        title: "No workflow steps",
+        description: "Please add at least one processing step to your workflow.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Get uploaded files from localStorage (set by FileUpload component)
+    const uploadedFilesData = localStorage.getItem('uploadedMzData');
+    if (!uploadedFilesData) {
+      toast({
+        title: "No data files",
+        description: "Please upload data files before running the workflow.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      setProgress(0);
+      
+      const parsedData: ParsedMzData[] = JSON.parse(uploadedFilesData);
+      
+      toast({
+        title: "Workflow started",
+        description: "Processing your metabolomics data...",
+      });
+
+      const result = await processingService.processWorkflow(workflowSteps, parsedData);
+      
+      if (result.success) {
+        toast({
+          title: "Workflow completed successfully",
+          description: `Processed ${result.summary.peaksDetected} peaks and identified ${result.summary.compoundsIdentified} compounds in ${result.summary.processingTime}s.`,
+        });
+      } else {
+        toast({
+          title: "Workflow completed with errors",
+          description: "Some processing steps failed. Check the results for details.",
+          variant: "destructive"
+        });
+      }
+      
+    } catch (error) {
+      console.error("Workflow execution failed:", error);
+      toast({
+        title: "Workflow failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+      setProgress(0);
+      setCurrentStep("");
+    }
   };
+
+  // Check if files are available
+  const hasFiles = !!localStorage.getItem('uploadedMzData');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -24,10 +101,11 @@ const Workflows = () => {
             </div>
             <Button 
               onClick={handleRunWorkflow}
+              disabled={!hasFiles || workflowSteps.length === 0 || isProcessing}
               className="bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700"
             >
               <Play className="w-4 h-4 mr-2" />
-              Run Workflow
+              {isProcessing ? `Processing... ${progress.toFixed(0)}%` : "Run Workflow"}
             </Button>
           </div>
         </div>
@@ -41,6 +119,20 @@ const Workflows = () => {
           <p className="text-lg text-slate-600">
             Create custom processing pipelines for your metabolomics data
           </p>
+          {isProcessing && (
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-blue-800 font-medium">{currentStep}</span>
+                <span className="text-blue-600">{progress.toFixed(1)}%</span>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                  style={{ width: `${progress}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
         </div>
 
         <Card>
@@ -49,7 +141,7 @@ const Workflows = () => {
               <Settings className="w-5 h-5" />
               <span>Workflow Builder</span>
             </CardTitle>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled={isProcessing}>
               <Plus className="w-4 h-4 mr-2" />
               Add Step
             </Button>
@@ -58,7 +150,7 @@ const Workflows = () => {
             <WorkflowBuilder 
               steps={workflowSteps} 
               onStepsChange={setWorkflowSteps}
-              hasFiles={true}
+              hasFiles={hasFiles}
             />
           </CardContent>
         </Card>

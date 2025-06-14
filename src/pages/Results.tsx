@@ -1,19 +1,36 @@
-
 import { FileText, Download, Eye, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ResultsPanel from "@/components/ResultsPanel";
 import DataVisualization from "@/components/DataVisualization";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useState, useEffect } from "react";
 
 const Results = () => {
-  // Mock results data
-  const mockResults = {
-    processed: true,
-    peaksDetected: 1247,
-    compoundsIdentified: 384,
-    processingTime: 23
-  };
+  const [results, setResults] = useState(null);
+
+  useEffect(() => {
+    // Load results from processing service
+    const lastResult = processingService.getLastResult();
+    if (lastResult) {
+      setResults({
+        processed: lastResult.success,
+        peaksDetected: lastResult.summary.peaksDetected,
+        compoundsIdentified: lastResult.summary.compoundsIdentified,
+        processingTime: lastResult.summary.processingTime,
+        steps: lastResult.results
+      });
+    } else {
+      // Fallback to mock data if no results available
+      setResults({
+        processed: false,
+        peaksDetected: 0,
+        compoundsIdentified: 0,
+        processingTime: 0,
+        message: "No analysis results available. Please run a workflow first."
+      });
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -30,7 +47,10 @@ const Results = () => {
                 <Eye className="w-4 h-4 mr-2" />
                 Preview
               </Button>
-              <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
+              <Button 
+                className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
+                disabled={!results?.processed}
+              >
                 <Download className="w-4 h-4 mr-2" />
                 Export Results
               </Button>
@@ -70,7 +90,7 @@ const Results = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ResultsPanel results={mockResults} />
+                <ResultsPanel results={results} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -84,7 +104,7 @@ const Results = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <DataVisualization results={mockResults} />
+                <DataVisualization results={results} />
               </CardContent>
             </Card>
           </TabsContent>
