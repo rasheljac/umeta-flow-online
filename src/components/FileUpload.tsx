@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from "react";
 import { Upload, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
@@ -9,6 +8,7 @@ import { parseMzFile, ParsedMzData } from "@/utils/mzParser";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthProvider";
+import { Json } from "@/integrations/supabase/types";
 
 interface FileUploadProps {
   onFileUpload: (files: File[]) => void;
@@ -74,7 +74,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
         base_peak_mz: spectrum.basePeakMz,
         base_peak_intensity: spectrum.basePeakIntensity,
         total_ion_current: spectrum.totalIonCurrent,
-        peaks: spectrum.peaks
+        peaks: spectrum.peaks as unknown as Json
       }));
 
       const { error: spectraError } = await supabase
@@ -166,7 +166,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(acceptedFiles);
     handleFileUpload(acceptedFiles);
-  }, [user]);
+  }, [user, handleFileUpload]);
 
   const {getRootProps, getInputProps, isDragActive} = useDropzone({
     onDrop,
@@ -215,7 +215,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
         </div>
       )}
 
-      {files.length > 0 && (
+      {files.length > 0 && !isProcessing && (
         <div className="space-y-2">
           <Label>Uploaded Files:</Label>
           <ul className="list-none pl-0">
