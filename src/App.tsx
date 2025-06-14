@@ -1,3 +1,4 @@
+
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,6 +13,8 @@ import Results from "./pages/Results";
 import AuthPage from "./components/AuthPage";
 import NotFound from "./pages/NotFound";
 import MyAnalysis from "@/pages/MyAnalysis";
+import Profile from "@/pages/Profile";
+import Settings from "@/pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +45,16 @@ const App = () => (
                 </ProtectedRoute>
               } />
               <Route path="/my-analysis" element={<MyAnalysis />} />
+              <Route path="/profile" element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              <Route path="/settings" element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              } />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </div>
@@ -52,3 +65,4 @@ const App = () => (
 );
 
 export default App;
+

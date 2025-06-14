@@ -2,7 +2,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from './AuthProvider';
-import { Microscope, Upload, Settings, BarChart3, LogOut, User } from 'lucide-react';
+import { Microscope, Upload, Settings as SettingsIcon, BarChart3, LogOut, User } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,8 +28,13 @@ const Navigation = () => {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-8">
             <Link to="/" className="flex items-center space-x-3">
-              <Microscope className="w-6 h-6 text-blue-600" />
-              <span className="text-xl font-bold text-slate-900">MetaboFlow</span>
+              {/* Logo branding */}
+              <img
+                src="/lovable-uploads/9521b0f4-3d7b-4906-a9fc-de87f5126a5a.png"
+                alt="Kapelczak Logo"
+                className="h-7 w-7"
+              />
+              <span className="text-xl font-bold text-slate-900" style={{ letterSpacing: "0.01em" }}>Kapelczak</span>
             </Link>
             
             <div className="hidden md:flex space-x-6">
@@ -44,7 +49,7 @@ const Navigation = () => {
                 to="/workflows" 
                 className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
               >
-                <Settings className="w-4 h-4" />
+                <SettingsIcon className="w-4 h-4" />
                 <span>Workflows</span>
               </Link>
               <Link 
@@ -53,6 +58,20 @@ const Navigation = () => {
               >
                 <BarChart3 className="w-4 h-4" />
                 <span>Results</span>
+              </Link>
+              <Link
+                to="/profile"
+                className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
+              >
+                <User className="w-4 h-4" />
+                <span>Profile</span>
+              </Link>
+              <Link
+                to="/settings"
+                className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
+              >
+                <SettingsIcon className="w-4 h-4" />
+                <span>Settings</span>
               </Link>
             </div>
           </div>
@@ -65,9 +84,17 @@ const Navigation = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled>
-                <User className="w-4 h-4 mr-2" />
-                {user.email}
+              <DropdownMenuItem asChild>
+                <Link to="/profile" className="flex items-center">
+                  <User className="w-4 h-4 mr-2" />
+                  Profile
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/settings" className="flex items-center">
+                  <SettingsIcon className="w-4 h-4 mr-2" />
+                  Settings
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut}>
@@ -83,3 +110,4 @@ const Navigation = () => {
 };
 
 export default Navigation;
+
