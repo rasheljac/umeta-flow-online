@@ -5,6 +5,7 @@ import ResultsPanel from "@/components/ResultsPanel";
 import DataVisualization from "@/components/DataVisualization";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
+import { processingService } from "@/services/processingService";
 
 const Results = () => {
   const [results, setResults] = useState(null);

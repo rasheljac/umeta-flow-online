@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from "react";
 import { Upload, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
@@ -18,19 +19,6 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   const [parsingProgress, setParsingProgress] = useState(0);
   const [parsedData, setParsedData] = useState<ParsedMzData[]>([]);
   const { toast } = useToast();
-
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    setFiles(acceptedFiles);
-    handleFileUpload(acceptedFiles);
-  }, [handleFileUpload]);
-
-  const {getRootProps, getInputProps, isDragActive} = useDropzone({
-    onDrop,
-    accept: {
-      'application/xml': ['.mzML', '.mzXML']
-    },
-    multiple: true
-  });
 
   const handleFileUpload = async (files: File[]) => {
     if (files.length === 0) return;
@@ -78,6 +66,19 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
       setIsProcessing(false);
     }
   };
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    setFiles(acceptedFiles);
+    handleFileUpload(acceptedFiles);
+  }, []);
+
+  const {getRootProps, getInputProps, isDragActive} = useDropzone({
+    onDrop,
+    accept: {
+      'application/xml': ['.mzML', '.mzXML']
+    },
+    multiple: true
+  });
 
   const handleRemoveFile = (fileToRemove: File) => {
     setFiles(prevFiles => prevFiles.filter(file => file !== fileToRemove));
