@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,8 +8,13 @@ import MassSpectrumViewer from "./MassSpectrumViewer";
 import ChromatogramViewer from "./ChromatogramViewer";
 import { ParsedMzData } from "@/utils/mzParser";
 
+// Added new props for workflow summary, steps, sampleType, sampleOrder
 interface DataVisualizationProps {
   results: any;
+  workflowSteps?: any[];
+  sampleType?: "Serum" | "Tissue";
+  sampleOrder?: { fileName: string; order: number }[];
+  uploadedDataOverride?: ParsedMzData[];
 }
 
 const generateMockData = () => {
@@ -49,13 +53,24 @@ const generateMockData = () => {
   return { intensityData, pcaData, pathwayData, timeSeriesData };
 };
 
-const DataVisualization = ({ results }: DataVisualizationProps) => {
+const DataVisualization = ({
+  results,
+  workflowSteps = [],
+  sampleType = "Serum",
+  sampleOrder = [],
+  uploadedDataOverride = undefined,
+}: DataVisualizationProps) => {
+  // Detect workflow run and statistics step success
   const [selectedChart, setSelectedChart] = useState("intensity");
   const [uploadedData, setUploadedData] = useState<ParsedMzData[]>([]);
   const mockData = generateMockData();
 
   useEffect(() => {
     // Load uploaded mzML/mzXML data for visualization
+    if (uploadedDataOverride) {
+      setUploadedData(uploadedDataOverride);
+      return;
+    }
     const storedData = localStorage.getItem('uploadedMzData');
     if (storedData) {
       try {
@@ -65,9 +80,38 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
         console.error('Failed to load uploaded data:', error);
       }
     }
-  }, []);
+  }, [uploadedDataOverride]);
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
+
+  // Check if statistics step is present and succeeded
+  const statisticsStepSucceeded = useMemo(() => {
+    if (!results?.results) return false;
+    const statsStep = results.results.find((s: any) => s.stepName === "Statistical Analysis" && s.success);
+    return !!statsStep;
+  }, [results]);
+
+  // Check for sampleType / serum and whether to allow timeseries
+  const showTimeSeries = sampleType === "Serum";
+
+  // Tabs visibility logic
+  const enabledTabs = {
+    spectra: true,
+    chromatograms: true,
+    intensity: statisticsStepSucceeded,
+    pca: statisticsStepSucceeded,
+    pathway: statisticsStepSucceeded,
+    timeseries: showTimeSeries,
+  };
+
+  // Handle sample ordering for Time Series tab
+  let orderedTimeSeriesData = mockData.timeSeriesData;
+  if (showTimeSeries && uploadedData.length && sampleOrder.length === uploadedData.length) {
+    orderedTimeSeriesData = [...mockData.timeSeriesData];
+    // (Optional) Sort real data according to sampleOrder, and pass to charts as needed.
+    // For this mock, simply shuffle or order accordingly if you have real mapping
+    // In a real implementation you'd use actual sample/meta data!
+  }
 
   if (!results || !results.processed) {
     return (
@@ -90,39 +134,29 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
           <SelectContent>
             <SelectItem value="spectra">Mass Spectra</SelectItem>
             <SelectItem value="chromatograms">Chromatograms</SelectItem>
-            <SelectItem value="intensity">Compound Intensities</SelectItem>
-            <SelectItem value="pca">PCA Analysis</SelectItem>
-            <SelectItem value="pathway">Pathway Enrichment</SelectItem>
-            <SelectItem value="timeseries">Time Series</SelectItem>
+            <SelectItem value="intensity" disabled={!enabledTabs.intensity}>Compound Intensities</SelectItem>
+            <SelectItem value="pca" disabled={!enabledTabs.pca}>PCA Analysis</SelectItem>
+            <SelectItem value="pathway" disabled={!enabledTabs.pathway}>Pathway Enrichment</SelectItem>
+            <SelectItem value="timeseries" disabled={!enabledTabs.timeseries}>Time Series</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       <Tabs value={selectedChart} onValueChange={setSelectedChart}>
         <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="spectra">
-            <Zap className="w-4 h-4 mr-2" />
-            Mass Spectra
+          <TabsTrigger value="spectra"> <Zap className="w-4 h-4 mr-2" /> Mass Spectra </TabsTrigger>
+          <TabsTrigger value="chromatograms"><Clock className="w-4 h-4 mr-2" /> Chromatograms </TabsTrigger>
+          <TabsTrigger value="intensity" disabled={!enabledTabs.intensity}>
+            <BarChart3 className="w-4 h-4 mr-2" /> Intensities
           </TabsTrigger>
-          <TabsTrigger value="chromatograms">
-            <Clock className="w-4 h-4 mr-2" />
-            Chromatograms
+          <TabsTrigger value="pca" disabled={!enabledTabs.pca}>
+            <Target className="w-4 h-4 mr-2" /> PCA
           </TabsTrigger>
-          <TabsTrigger value="intensity">
-            <BarChart3 className="w-4 h-4 mr-2" />
-            Intensities
+          <TabsTrigger value="pathway" disabled={!enabledTabs.pathway}>
+            <PieChartIcon className="w-4 h-4 mr-2" /> Pathways
           </TabsTrigger>
-          <TabsTrigger value="pca">
-            <Target className="w-4 h-4 mr-2" />
-            PCA
-          </TabsTrigger>
-          <TabsTrigger value="pathway">
-            <PieChartIcon className="w-4 h-4 mr-2" />
-            Pathways
-          </TabsTrigger>
-          <TabsTrigger value="timeseries">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Time Series
+          <TabsTrigger value="timeseries" disabled={!enabledTabs.timeseries}>
+            <TrendingUp className="w-4 h-4 mr-2" /> Time Series
           </TabsTrigger>
         </TabsList>
 
@@ -276,7 +310,7 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
             <CardContent>
               <div className="h-96">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={mockData.timeSeriesData}>
+                  <LineChart data={orderedTimeSeriesData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
                     <YAxis />

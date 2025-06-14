@@ -15,6 +15,11 @@ const Workflows = () => {
   const [currentStep, setCurrentStep] = useState("");
   const { toast } = useToast();
 
+  // New: hold sample type and sample order for time series
+  const [sampleType, setSampleType] = useState<"Serum" | "Tissue">("Serum");
+  const [sampleOrder, setSampleOrder] = useState<{ fileName: string; order: number }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<{ fileName: string }[]>([]);
+
   useEffect(() => {
     const handleProgress = (event: any) => {
       setProgress(event.detail.progress);
@@ -23,6 +28,20 @@ const Workflows = () => {
 
     window.addEventListener('workflow-progress', handleProgress);
     return () => window.removeEventListener('workflow-progress', handleProgress);
+  }, []);
+
+  // Load uploaded files (fileName) for file ordering
+  useEffect(() => {
+    const uploaded = localStorage.getItem('uploadedMzData');
+    if (uploaded) {
+      try {
+        const parsed: ParsedMzData[] = JSON.parse(uploaded);
+        const files = parsed.map(f => ({ fileName: f.fileName }));
+        setUploadedFiles(files);
+      } catch {}
+    } else {
+      setUploadedFiles([]);
+    }
   }, []);
 
   const handleRunWorkflow = async () => {
@@ -35,7 +54,6 @@ const Workflows = () => {
       return;
     }
 
-    // Get uploaded files from localStorage (set by FileUpload component)
     const uploadedFilesData = localStorage.getItem('uploadedMzData');
     if (!uploadedFilesData) {
       toast({
@@ -51,6 +69,16 @@ const Workflows = () => {
       setProgress(0);
       
       const parsedData: ParsedMzData[] = JSON.parse(uploadedFilesData);
+
+      // Optionally, you can process with sampleOrder if required and "Serum"
+      if (sampleType === "Serum" && sampleOrder.length === uploadedFiles.length) {
+        // Reorder parsedData according to sampleOrder
+        parsedData.sort((a, b) => {
+          const orderA = sampleOrder.find(o => o.fileName === a.fileName)?.order ?? 0;
+          const orderB = sampleOrder.find(o => o.fileName === b.fileName)?.order ?? 0;
+          return orderA - orderB;
+        });
+      }
       
       toast({
         title: "Workflow started",
@@ -86,7 +114,6 @@ const Workflows = () => {
     }
   };
 
-  // Check if files are available
   const hasFiles = !!localStorage.getItem('uploadedMzData');
 
   return (
@@ -151,6 +178,11 @@ const Workflows = () => {
               steps={workflowSteps} 
               onStepsChange={setWorkflowSteps}
               hasFiles={hasFiles}
+              uploadedFiles={uploadedFiles}
+              sampleType={sampleType}
+              onSampleTypeChange={setSampleType}
+              sampleOrder={sampleOrder}
+              onSampleOrderChange={setSampleOrder}
             />
           </CardContent>
         </Card>
