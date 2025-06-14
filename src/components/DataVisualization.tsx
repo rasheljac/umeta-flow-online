@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TrendingUp, BarChart3, PieChart as PieChartIcon, Scatter as ScatterIcon } from "lucide-react";
+import { TrendingUp, BarChart3, PieChart as PieChartIcon, Target } from "lucide-react";
 
 interface DataVisualizationProps {
   results: any;
@@ -85,7 +85,7 @@ const DataVisualization = ({ results }: DataVisualizationProps) => {
             Intensities
           </TabsTrigger>
           <TabsTrigger value="pca">
-            <ScatterIcon className="w-4 h-4 mr-2" />
+            <Target className="w-4 h-4 mr-2" />
             PCA
           </TabsTrigger>
           <TabsTrigger value="pathway">
