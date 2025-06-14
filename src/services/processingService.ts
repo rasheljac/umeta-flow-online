@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 // If not already present, add a definition for the options type:
 interface WorkflowOptions {
   workflowName?: string;
@@ -100,5 +98,13 @@ export const processingService = {
       console.error("Error during workflow execution:", error);
       return { success: false, summary: { error: error.message } };
     }
-  }
+  },
+
+  getLastResult(): any | null {
+    const allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
+    if (!allAnalyses.length) return null;
+    const last = allAnalyses[allAnalyses.length - 1];
+    // Optionally, format if needed:
+    return last;
+  },
 };
