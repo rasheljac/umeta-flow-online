@@ -8,16 +8,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
 import { processingService } from "@/services/processingService";
 import { ParsedMzData } from "@/utils/mzParser";
+import { useToast } from "@/hooks/use-toast";
 
 const Results = () => {
   const [results, setResults] = useState<any>(null);
   const [uploadedData, setUploadedData] = useState<ParsedMzData[]>([]);
+  const { toast } = useToast();
 
   useEffect(() => {
     // Load results from processing service
     const lastResult = processingService.getLastResult();
+    console.log('Loading results in Results page:', lastResult);
+    
     if (lastResult) {
-      console.log('Loaded processing results:', lastResult);
       setResults(lastResult);
     } else {
       // Fallback to indicate no results available
@@ -44,37 +47,107 @@ const Results = () => {
     }
   }, []);
 
-  const handleExportResults = () => {
+  const handlePreview = () => {
     if (!results?.processedData || results.processedData.length === 0) {
-      console.warn('No processed data available for export');
+      toast({
+        title: "No data to preview",
+        description: "Run an analysis workflow first to generate results.",
+        variant: "destructive"
+      });
       return;
     }
 
-    // Create CSV content from processed data
-    const csvContent = generateCSVFromResults(results.processedData);
+    // Create a preview of the results data
+    const previewData = results.processedData.map((sample: any) => ({
+      fileName: sample.fileName,
+      peaksDetected: sample.detectedPeaks?.length || 0,
+      compoundsIdentified: sample.identifiedCompounds?.length || 0,
+      totalSpectra: sample.totalSpectra || 0
+    }));
+
+    console.log('Preview data:', previewData);
     
-    // Create and download file
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `metabolomics_results_${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+    toast({
+      title: "Results Preview",
+      description: `Found ${previewData.length} processed samples with ${results.summary?.peaksDetected || 0} total peaks detected.`
+    });
   };
 
-  const generateCSVFromResults = (processedData: any[]) => {
-    let csvContent = 'Sample,Compound,Formula,Mass,Intensity,RetentionTime,MatchScore\n';
-    
-    processedData.forEach(sample => {
-      const compounds = sample.identifiedCompounds || [];
-      compounds.forEach((compound: any) => {
-        const peak = compound.peaks[0];
-        csvContent += `${sample.fileName},${compound.name},${compound.formula},${compound.mass},${peak?.intensity || 0},${peak?.retentionTime || 0},${compound.matchScore}\n`;
+  const handleExportResults = () => {
+    if (!results?.processedData || results.processedData.length === 0) {
+      toast({
+        title: "No data to export",
+        description: "Run an analysis workflow first to generate results.",
+        variant: "destructive"
       });
-    });
+      return;
+    }
+
+    try {
+      // Create comprehensive CSV content from processed data
+      const csvContent = generateComprehensiveCSV(results);
+      
+      // Create and download file
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `metabolomics_results_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Export successful",
+        description: "Results have been exported to CSV file."
+      });
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast({
+        title: "Export failed",
+        description: "Failed to export results. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const generateComprehensiveCSV = (results: any) => {
+    let csvContent = 'Sample,PeaksDetected,CompoundsIdentified,ProcessingStatus\n';
+    
+    if (results.processedData && results.processedData.length > 0) {
+      results.processedData.forEach((sample: any) => {
+        const peaksCount = sample.detectedPeaks?.length || 0;
+        const compoundsCount = sample.identifiedCompounds?.length || 0;
+        const status = sample.processingStatus || 'completed';
+        
+        csvContent += `${sample.fileName || 'Unknown'},${peaksCount},${compoundsCount},${status}\n`;
+        
+        // Add detailed peak information if available
+        if (sample.detectedPeaks && sample.detectedPeaks.length > 0) {
+          csvContent += '\nPeak Details:\n';
+          csvContent += 'Peak_ID,Mass,Intensity,RetentionTime\n';
+          
+          sample.detectedPeaks.forEach((peak: any, index: number) => {
+            csvContent += `Peak_${index + 1},${peak.mz || peak.mass || 0},${peak.intensity || 0},${peak.rt || peak.retentionTime || 0}\n`;
+          });
+        }
+        
+        // Add compound identification details if available
+        if (sample.identifiedCompounds && sample.identifiedCompounds.length > 0) {
+          csvContent += '\nCompound Details:\n';
+          csvContent += 'Compound_Name,Formula,Mass,MatchScore\n';
+          
+          sample.identifiedCompounds.forEach((compound: any) => {
+            csvContent += `${compound.name || 'Unknown'},${compound.formula || ''},${compound.mass || 0},${compound.matchScore || compound.score || 0}\n`;
+          });
+        }
+        
+        csvContent += '\n';
+      });
+    } else {
+      csvContent += 'No processed data available\n';
+    }
     
     return csvContent;
   };
@@ -90,7 +163,12 @@ const Results = () => {
               <h1 className="text-xl font-bold text-slate-900">Analysis Results</h1>
             </div>
             <div className="flex space-x-2">
-              <Button variant="outline" size="sm">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handlePreview}
+                disabled={!results?.processed}
+              >
                 <Eye className="w-4 h-4 mr-2" />
                 Preview
               </Button>
@@ -115,11 +193,11 @@ const Results = () => {
           <p className="text-lg text-slate-600">
             View, analyze, and export your metabolomics processing results
           </p>
-          {results?.processed && (
+          {results?.processed && results?.summary && (
             <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
-              <span>• Peaks Detected: {results.summary?.peaksDetected || 0}</span>
-              <span>• Compounds Identified: {results.summary?.compoundsIdentified || 0}</span>
-              <span>• Processing Time: {results.summary?.processingTime || 0}s</span>
+              <span>• Peaks Detected: {results.summary.peaksDetected || 0}</span>
+              <span>• Compounds Identified: {results.summary.compoundsIdentified || 0}</span>
+              <span>• Processing Time: {results.summary.processingTime || 0}s</span>
               <span>• Samples Processed: {results.processedData?.length || 0}</span>
             </div>
           )}

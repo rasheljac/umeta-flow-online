@@ -85,7 +85,8 @@ export const processingService = {
         filteredPeaks: [],
         normalizedPeaks: [],
         identifiedCompounds: [],
-        statisticalResults: null
+        statisticalResults: null,
+        processingStatus: 'processing'
       };
 
       // Validate spectra structure
@@ -296,13 +297,28 @@ export const processingService = {
       const endTime = performance.now();
       const processingTime = ((endTime - startTime) / 1000).toFixed(2);
 
+      // Mark all samples as completed
+      processedData = processedData.map(sample => ({
+        ...sample,
+        processingStatus: 'completed'
+      }));
+
       const summary = {
         peaksDetected,
         compoundsIdentified,
         processingTime
       };
 
-      // Store analysis results
+      const hasFailures = results.some(r => !r.success);
+      const finalResult = {
+        success: !hasFailures,
+        processed: true,
+        summary,
+        results,
+        processedData
+      };
+
+      // Store analysis results with enhanced structure
       try {
         const analysis = {
           workflowName,
@@ -310,7 +326,9 @@ export const processingService = {
           summary,
           steps: workflowSteps,
           results,
-          processedData
+          processedData,
+          success: !hasFailures,
+          processed: true
         };
         
         let allAnalyses = [];
@@ -324,18 +342,16 @@ export const processingService = {
         
         allAnalyses.push(analysis);
         localStorage.setItem('myAnalyses', JSON.stringify(allAnalyses));
+        
+        // Also store as the last result for easy access
+        localStorage.setItem('lastProcessingResult', JSON.stringify(finalResult));
+        
+        console.log('Analysis results saved successfully:', analysis);
       } catch (storageError) {
         console.error('Failed to store analysis results:', storageError);
       }
 
-      const hasFailures = results.some(r => !r.success);
-      
-      return { 
-        success: !hasFailures, 
-        summary,
-        results,
-        processedData
-      };
+      return finalResult;
 
     } catch (error: any) {
       console.error("Critical error during workflow execution:", error);
@@ -359,13 +375,26 @@ export const processingService = {
 
   getLastResult(): any | null {
     try {
+      // First try to get from the direct storage
+      const lastResult = localStorage.getItem('lastProcessingResult');
+      if (lastResult) {
+        const parsed = JSON.parse(lastResult);
+        console.log('Found last processing result:', parsed);
+        return parsed;
+      }
+
+      // Fallback to getting from analyses
       const allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
-      if (!allAnalyses.length) return null;
+      if (!allAnalyses.length) {
+        console.log('No analyses found in storage');
+        return null;
+      }
       
       const last = allAnalyses[allAnalyses.length - 1];
+      console.log('Using last analysis result:', last);
       
       return {
-        success: true,
+        success: last.success !== false,
         processed: true,
         summary: last.summary || { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
         results: last.results || [],
