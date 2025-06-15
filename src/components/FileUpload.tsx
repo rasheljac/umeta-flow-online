@@ -20,6 +20,7 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [parsingProgress, setParsingProgress] = useState(0);
   const [parsedData, setParsedData] = useState<ParsedMzData[]>([]);
+  const [currentProcessingFile, setCurrentProcessingFile] = useState<string>("");
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -151,34 +152,46 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
     setParsedData([]);
 
     const newParsedData: ParsedMzData[] = [];
+    const totalFiles = files.length;
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        setCurrentProcessingFile(file.name);
         console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
         
+        const baseProgress = (i / totalFiles) * 100;
+        const stepSize = 100 / totalFiles / 3; // 3 steps per file: parse, upload, save
+        
         try {
-          // Parse the file
+          // Step 1: Parse the file (33% of this file's progress)
           console.log('Parsing file...');
+          setParsingProgress(baseProgress + stepSize * 0.5);
           const parsed = await parseMzFile(file);
           console.log('File parsed successfully:', {
             spectra: parsed.totalSpectra,
             chromatograms: parsed.chromatograms.length
           });
+          setParsingProgress(baseProgress + stepSize);
           
           newParsedData.push(parsed);
           
-          // Upload to storage
+          // Step 2: Upload to storage (33% of this file's progress)
           console.log('Uploading to storage...');
+          setParsingProgress(baseProgress + stepSize * 1.5);
           const filePath = await uploadFileToStorage(file);
+          setParsingProgress(baseProgress + stepSize * 2);
           
           if (filePath) {
-            // Save to database
+            // Step 3: Save to database (33% of this file's progress)
             console.log('Saving to database...');
+            setParsingProgress(baseProgress + stepSize * 2.5);
             await saveSampleToDatabase(parsed, filePath, file.size);
           }
           
-          setParsingProgress(((i + 1) / files.length) * 100);
+          // Complete this file
+          setParsingProgress(baseProgress + stepSize * 3);
+          
         } catch (error) {
           console.error(`Failed to process ${file.name}:`, error);
           toast({
@@ -210,6 +223,8 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
       });
     } finally {
       setIsProcessing(false);
+      setCurrentProcessingFile("");
+      setParsingProgress(0);
     }
   };
 
@@ -259,8 +274,8 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
       {isProcessing && (
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
-            <span>Processing files...</span>
-            <span>{parsingProgress.toFixed(0)}%</span>
+            <span>Processing {currentProcessingFile}...</span>
+            <span>{parsingProgress.toFixed(1)}%</span>
           </div>
           <Progress value={parsingProgress} className="w-full" />
         </div>
