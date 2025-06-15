@@ -49,20 +49,38 @@ export const processingService = {
     let compoundsIdentified = 0;
     const results: Array<{ stepName: string; success: boolean; message?: string }> = [];
     
+    // Validate input data
+    if (!parsedData || parsedData.length === 0) {
+      throw new Error("No data files provided for processing");
+    }
+
+    if (!workflowSteps || workflowSteps.length === 0) {
+      throw new Error("No workflow steps defined");
+    }
+
+    console.log("Starting workflow:", workflowName);
+    console.log("Workflow steps:", workflowSteps.map(s => s.name || s.type));
+    console.log("Data files:", parsedData.map(d => d.fileName));
+
     // Initialize data that will be passed through the pipeline
-    let processedData = [...parsedData];
+    let processedData = parsedData.map(sample => ({
+      ...sample,
+      // Ensure required properties exist
+      spectra: sample.spectra || [],
+      chromatograms: sample.chromatograms || [],
+      fileName: sample.fileName || 'unknown',
+      totalSpectra: sample.totalSpectra || 0
+    }));
 
     try {
-      console.log("Starting workflow:", workflowName);
-      console.log("Workflow steps:", workflowSteps);
-      console.log("Data files:", parsedData.map(d => d.fileName));
-
       for (let i = 0; i < workflowSteps.length; i++) {
         const step = workflowSteps[i];
         const progress = ((i + 1) / workflowSteps.length) * 100;
         
+        console.log(`Processing step ${i + 1}/${workflowSteps.length}: ${step.name || step.type}`);
+        
         window.dispatchEvent(new CustomEvent('workflow-progress', {
-          detail: { currentStep: `Running step: ${step.name}`, progress }
+          detail: { currentStep: `Running step: ${step.name || step.type}`, progress }
         }));
 
         try {
@@ -70,45 +88,57 @@ export const processingService = {
             case "peak_detection":
               console.log("Running Peak Detection...");
               const peakResult = await detectPeaks(processedData, step.parameters || {});
+              if (!peakResult || !peakResult.data) {
+                throw new Error("Peak detection failed to return valid data");
+              }
               processedData = peakResult.data;
-              peaksDetected = peakResult.peaksDetected;
+              peaksDetected = peakResult.peaksDetected || 0;
               results.push({ 
                 stepName: "Peak Detection", 
                 success: true, 
-                message: peakResult.message 
+                message: peakResult.message || `Detected ${peaksDetected} peaks`
               });
               break;
 
             case "alignment":
               console.log("Running Peak Alignment...");
               const alignResult = await alignPeaks(processedData, step.parameters || {});
+              if (!alignResult || !alignResult.data) {
+                throw new Error("Peak alignment failed to return valid data");
+              }
               processedData = alignResult.data;
               results.push({ 
                 stepName: "Peak Alignment", 
                 success: true, 
-                message: alignResult.message 
+                message: alignResult.message || "Peak alignment completed"
               });
               break;
 
             case "filtering":
               console.log("Running Data Filtering...");
               const filterResult = await filterData(processedData, step.parameters || {});
+              if (!filterResult || !filterResult.data) {
+                throw new Error("Data filtering failed to return valid data");
+              }
               processedData = filterResult.data;
               results.push({ 
                 stepName: "Data Filtering", 
                 success: true, 
-                message: filterResult.message 
+                message: filterResult.message || "Data filtering completed"
               });
               break;
 
             case "normalization":
               console.log("Running Data Normalization...");
               const normalizeResult = await normalizeData(processedData, step.parameters || {});
+              if (!normalizeResult || !normalizeResult.data) {
+                throw new Error("Data normalization failed to return valid data");
+              }
               processedData = normalizeResult.data;
               results.push({ 
                 stepName: "Data Normalization", 
                 success: true, 
-                message: normalizeResult.message 
+                message: normalizeResult.message || "Data normalization completed"
               });
               break;
 
@@ -120,32 +150,38 @@ export const processingService = {
                 mass_tolerance: mzTolerance,
                 ms2DbContent
               });
+              if (!identifyResult || !identifyResult.data) {
+                throw new Error("Compound identification failed to return valid data");
+              }
               processedData = identifyResult.data;
-              compoundsIdentified = identifyResult.compoundsIdentified;
+              compoundsIdentified = identifyResult.compoundsIdentified || 0;
               results.push({ 
                 stepName: "Compound Identification", 
                 success: true, 
-                message: identifyResult.message 
+                message: identifyResult.message || `Identified ${compoundsIdentified} compounds`
               });
               break;
 
             case "statistics":
               console.log("Running Statistical Analysis...");
               const statsResult = await performStatistics(processedData, step.parameters || {});
+              if (!statsResult || !statsResult.data) {
+                throw new Error("Statistical analysis failed to return valid data");
+              }
               processedData = statsResult.data;
               results.push({ 
                 stepName: "Statistical Analysis", 
                 success: true, 
-                message: statsResult.message 
+                message: statsResult.message || "Statistical analysis completed"
               });
               break;
 
             default:
-              console.warn(`Unknown workflow step: ${step.name}`);
+              console.warn(`Unknown workflow step: ${step.type}`);
               results.push({ 
-                stepName: step.name, 
+                stepName: step.name || step.type, 
                 success: false, 
-                message: "Unknown step type" 
+                message: `Unknown step type: ${step.type}`
               });
           }
           
@@ -153,12 +189,13 @@ export const processingService = {
           await new Promise(resolve => setTimeout(resolve, 200));
           
         } catch (stepError) {
-          console.error(`Error in step ${step.name}:`, stepError);
+          console.error(`Error in step ${step.name || step.type}:`, stepError);
           results.push({ 
-            stepName: step.name, 
+            stepName: step.name || step.type, 
             success: false, 
             message: stepError instanceof Error ? stepError.message : "Unknown error"
           });
+          // Continue with next step instead of failing completely
         }
       }
 
@@ -181,12 +218,21 @@ export const processingService = {
         processedData: processedData
       };
       
-      let allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
+      let allAnalyses = [];
+      try {
+        allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
+      } catch (error) {
+        console.warn('Failed to parse existing analyses:', error);
+        allAnalyses = [];
+      }
+      
       allAnalyses.push(analysis);
       localStorage.setItem('myAnalyses', JSON.stringify(allAnalyses));
 
+      const hasFailures = results.some(r => !r.success);
+      
       return { 
-        success: true, 
+        success: !hasFailures, 
         summary: summary,
         results: results,
         processedData: processedData
@@ -204,7 +250,7 @@ export const processingService = {
         results: [{ 
           stepName: "Workflow Error", 
           success: false, 
-          message: error.message 
+          message: error.message || "Unknown workflow error"
         }]
       };
     }
