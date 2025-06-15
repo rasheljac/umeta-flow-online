@@ -1,4 +1,13 @@
 
+import { 
+  detectPeaks, 
+  alignPeaks, 
+  filterData, 
+  normalizeData, 
+  identifyCompounds, 
+  performStatistics 
+} from '@/utils/dataProcessing';
+
 interface WorkflowOptions {
   workflowName?: string;
   ms2DbContent?: string | null;
@@ -20,6 +29,7 @@ interface ProcessingResult {
     success: boolean;
     message?: string;
   }>;
+  processedData?: any[];
 }
 
 export const processingService = {
@@ -38,14 +48,14 @@ export const processingService = {
     let peaksDetected = 0;
     let compoundsIdentified = 0;
     const results: Array<{ stepName: string; success: boolean; message?: string }> = [];
+    
+    // Initialize data that will be passed through the pipeline
+    let processedData = [...parsedData];
 
     try {
       console.log("Starting workflow:", workflowName);
       console.log("Workflow steps:", workflowSteps);
       console.log("Data files:", parsedData.map(d => d.fileName));
-      console.log("MS2 DB Content:", ms2DbContent ? 'Present' : 'Not present');
-      console.log("Sample Type:", sampleType);
-      console.log("Sample Order:", sampleOrder);
 
       for (let i = 0; i < workflowSteps.length; i++) {
         const step = workflowSteps[i];
@@ -59,34 +69,75 @@ export const processingService = {
           switch (step.type) {
             case "peak_detection":
               console.log("Running Peak Detection...");
-              peaksDetected = parsedData.reduce((sum, data) => sum + (data.spectra?.length || 0), 0);
-              results.push({ stepName: "Peak Detection", success: true });
+              const peakResult = await detectPeaks(processedData, step.parameters || {});
+              processedData = peakResult.data;
+              peaksDetected = peakResult.peaksDetected;
+              results.push({ 
+                stepName: "Peak Detection", 
+                success: true, 
+                message: peakResult.message 
+              });
               break;
 
             case "alignment":
               console.log("Running Peak Alignment...");
-              results.push({ stepName: "Peak Alignment", success: true });
+              const alignResult = await alignPeaks(processedData, step.parameters || {});
+              processedData = alignResult.data;
+              results.push({ 
+                stepName: "Peak Alignment", 
+                success: true, 
+                message: alignResult.message 
+              });
               break;
 
             case "filtering":
               console.log("Running Data Filtering...");
-              results.push({ stepName: "Data Filtering", success: true });
+              const filterResult = await filterData(processedData, step.parameters || {});
+              processedData = filterResult.data;
+              results.push({ 
+                stepName: "Data Filtering", 
+                success: true, 
+                message: filterResult.message 
+              });
               break;
 
             case "normalization":
               console.log("Running Data Normalization...");
-              results.push({ stepName: "Data Normalization", success: true });
+              const normalizeResult = await normalizeData(processedData, step.parameters || {});
+              processedData = normalizeResult.data;
+              results.push({ 
+                stepName: "Data Normalization", 
+                success: true, 
+                message: normalizeResult.message 
+              });
               break;
 
             case "identification":
               console.log("Running Compound Identification...");
-              compoundsIdentified = Math.floor(Math.random() * 50) + 10;
-              results.push({ stepName: "Compound Identification", success: true });
+              const identifyResult = await identifyCompounds(processedData, {
+                ...step.parameters,
+                database: step.parameters?.database || "HMDB",
+                mass_tolerance: mzTolerance,
+                ms2DbContent
+              });
+              processedData = identifyResult.data;
+              compoundsIdentified = identifyResult.compoundsIdentified;
+              results.push({ 
+                stepName: "Compound Identification", 
+                success: true, 
+                message: identifyResult.message 
+              });
               break;
 
             case "statistics":
               console.log("Running Statistical Analysis...");
-              results.push({ stepName: "Statistical Analysis", success: true });
+              const statsResult = await performStatistics(processedData, step.parameters || {});
+              processedData = statsResult.data;
+              results.push({ 
+                stepName: "Statistical Analysis", 
+                success: true, 
+                message: statsResult.message 
+              });
               break;
 
             default:
@@ -98,8 +149,8 @@ export const processingService = {
               });
           }
           
-          // Simulate processing time
-          await new Promise(resolve => setTimeout(resolve, 800));
+          // Small delay for UI feedback
+          await new Promise(resolve => setTimeout(resolve, 200));
           
         } catch (stepError) {
           console.error(`Error in step ${step.name}:`, stepError);
@@ -120,13 +171,14 @@ export const processingService = {
         processingTime
       };
 
-      // Store analysis in local storage
+      // Store analysis with processed data in local storage
       const analysis = {
         workflowName: workflowName,
         date: new Date().toISOString(),
         summary: summary,
         steps: workflowSteps,
-        results: results
+        results: results,
+        processedData: processedData
       };
       
       let allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
@@ -136,7 +188,8 @@ export const processingService = {
       return { 
         success: true, 
         summary: summary,
-        results: results
+        results: results,
+        processedData: processedData
       };
 
     } catch (error: any) {
@@ -163,12 +216,12 @@ export const processingService = {
       if (!allAnalyses.length) return null;
       const last = allAnalyses[allAnalyses.length - 1];
       
-      // Format the result to match expected structure
       return {
         success: true,
         processed: true,
         summary: last.summary,
-        results: last.results || []
+        results: last.results || [],
+        processedData: last.processedData || []
       };
     } catch (error) {
       console.error('Error loading last result:', error);

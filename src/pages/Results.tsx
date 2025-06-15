@@ -10,28 +10,24 @@ import { processingService } from "@/services/processingService";
 import { ParsedMzData } from "@/utils/mzParser";
 
 const Results = () => {
-  const [results, setResults] = useState(null);
+  const [results, setResults] = useState<any>(null);
   const [uploadedData, setUploadedData] = useState<ParsedMzData[]>([]);
 
   useEffect(() => {
     // Load results from processing service
     const lastResult = processingService.getLastResult();
     if (lastResult) {
-      setResults({
-        processed: lastResult.success,
-        peaksDetected: lastResult.summary.peaksDetected,
-        compoundsIdentified: lastResult.summary.compoundsIdentified,
-        processingTime: lastResult.summary.processingTime,
-        results: lastResult.results
-      });
+      console.log('Loaded processing results:', lastResult);
+      setResults(lastResult);
     } else {
-      // Fallback to mock data if no results available
+      // Fallback to indicate no results available
       setResults({
         processed: false,
         peaksDetected: 0,
         compoundsIdentified: 0,
         processingTime: 0,
-        message: "No analysis results available. Please run a workflow first."
+        message: "No analysis results available. Please run a workflow first.",
+        processedData: []
       });
     }
 
@@ -47,6 +43,41 @@ const Results = () => {
       }
     }
   }, []);
+
+  const handleExportResults = () => {
+    if (!results?.processedData || results.processedData.length === 0) {
+      console.warn('No processed data available for export');
+      return;
+    }
+
+    // Create CSV content from processed data
+    const csvContent = generateCSVFromResults(results.processedData);
+    
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `metabolomics_results_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const generateCSVFromResults = (processedData: any[]) => {
+    let csvContent = 'Sample,Compound,Formula,Mass,Intensity,RetentionTime,MatchScore\n';
+    
+    processedData.forEach(sample => {
+      const compounds = sample.identifiedCompounds || [];
+      compounds.forEach((compound: any) => {
+        const peak = compound.peaks[0];
+        csvContent += `${sample.fileName},${compound.name},${compound.formula},${compound.mass},${peak?.intensity || 0},${peak?.retentionTime || 0},${compound.matchScore}\n`;
+      });
+    });
+    
+    return csvContent;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -65,7 +96,8 @@ const Results = () => {
               </Button>
               <Button 
                 className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
-                disabled={!results?.processed}
+                disabled={!results?.processed || !results?.processedData?.length}
+                onClick={handleExportResults}
               >
                 <Download className="w-4 h-4 mr-2" />
                 Export Results
@@ -83,6 +115,14 @@ const Results = () => {
           <p className="text-lg text-slate-600">
             View, analyze, and export your metabolomics processing results
           </p>
+          {results?.processed && (
+            <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
+              <span>• Peaks Detected: {results.summary?.peaksDetected || 0}</span>
+              <span>• Compounds Identified: {results.summary?.compoundsIdentified || 0}</span>
+              <span>• Processing Time: {results.summary?.processingTime || 0}s</span>
+              <span>• Samples Processed: {results.processedData?.length || 0}</span>
+            </div>
+          )}
         </div>
 
         <Tabs defaultValue="visualize" className="space-y-6">
