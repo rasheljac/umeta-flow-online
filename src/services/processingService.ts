@@ -1,4 +1,3 @@
-
 import { 
   detectPeaks, 
   alignPeaks, 
@@ -318,37 +317,85 @@ export const processingService = {
         processedData
       };
 
-      // Store analysis results with enhanced structure
+      // Enhanced storage with quota handling
       try {
-        const analysis = {
+        // Create a lightweight summary for storage
+        const lightweightSummary = {
           workflowName,
           date: new Date().toISOString(),
           summary,
-          steps: workflowSteps,
+          steps: workflowSteps.map(s => ({ name: s.name || s.type, type: s.type })),
           results,
-          processedData,
           success: !hasFailures,
-          processed: true
+          processed: true,
+          sampleCount: processedData.length,
+          sampleNames: processedData.map(s => s.fileName)
         };
-        
-        let allAnalyses = [];
+
+        // Try to store the full result first
         try {
-          const existing = localStorage.getItem('myAnalyses');
-          allAnalyses = existing ? JSON.parse(existing) : [];
-        } catch (parseError) {
-          console.warn('Failed to parse existing analyses:', parseError);
-          allAnalyses = [];
+          const fullAnalysis = {
+            ...lightweightSummary,
+            processedData
+          };
+          
+          let allAnalyses = [];
+          try {
+            const existing = localStorage.getItem('myAnalyses');
+            allAnalyses = existing ? JSON.parse(existing) : [];
+          } catch (parseError) {
+            console.warn('Failed to parse existing analyses:', parseError);
+            allAnalyses = [];
+          }
+          
+          allAnalyses.push(fullAnalysis);
+          localStorage.setItem('myAnalyses', JSON.stringify(allAnalyses));
+          localStorage.setItem('lastProcessingResult', JSON.stringify(finalResult));
+          
+          console.log('Full analysis results saved successfully');
+        } catch (quotaError) {
+          console.warn('Storage quota exceeded, saving lightweight summary:', quotaError);
+          
+          // Fallback: Store only lightweight summary
+          let lightweightAnalyses = [];
+          try {
+            const existing = localStorage.getItem('myAnalysesLight');
+            lightweightAnalyses = existing ? JSON.parse(existing) : [];
+          } catch (parseError) {
+            lightweightAnalyses = [];
+          }
+          
+          lightweightAnalyses.push(lightweightSummary);
+          
+          // Keep only last 10 analyses to save space
+          if (lightweightAnalyses.length > 10) {
+            lightweightAnalyses = lightweightAnalyses.slice(-10);
+          }
+          
+          localStorage.setItem('myAnalysesLight', JSON.stringify(lightweightAnalyses));
+          
+          // Store lightweight result for immediate access
+          const lightweightResult = {
+            success: !hasFailures,
+            processed: true,
+            summary,
+            results,
+            processedData: processedData.map(sample => ({
+              fileName: sample.fileName,
+              detectedPeaks: sample.detectedPeaks ? sample.detectedPeaks.slice(0, 100) : [], // Keep only first 100 peaks
+              identifiedCompounds: sample.identifiedCompounds ? sample.identifiedCompounds.slice(0, 50) : [], // Keep only first 50 compounds
+              processingStatus: sample.processingStatus,
+              totalSpectra: sample.totalSpectra
+            }))
+          };
+          
+          localStorage.setItem('lastProcessingResult', JSON.stringify(lightweightResult));
+          console.log('Lightweight analysis results saved successfully');
         }
         
-        allAnalyses.push(analysis);
-        localStorage.setItem('myAnalyses', JSON.stringify(allAnalyses));
-        
-        // Also store as the last result for easy access
-        localStorage.setItem('lastProcessingResult', JSON.stringify(finalResult));
-        
-        console.log('Analysis results saved successfully:', analysis);
       } catch (storageError) {
-        console.error('Failed to store analysis results:', storageError);
+        console.error('Failed to store any analysis results:', storageError);
+        // Even if storage fails, we still return the result for immediate use
       }
 
       return finalResult;
@@ -383,23 +430,46 @@ export const processingService = {
         return parsed;
       }
 
-      // Fallback to getting from analyses
-      const allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
-      if (!allAnalyses.length) {
-        console.log('No analyses found in storage');
-        return null;
+      // Fallback to getting from full analyses
+      try {
+        const allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
+        if (allAnalyses.length > 0) {
+          const last = allAnalyses[allAnalyses.length - 1];
+          console.log('Using last full analysis result:', last);
+          
+          return {
+            success: last.success !== false,
+            processed: true,
+            summary: last.summary || { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
+            results: last.results || [],
+            processedData: last.processedData || []
+          };
+        }
+      } catch (error) {
+        console.warn('Failed to load from full analyses, trying lightweight:', error);
+      }
+
+      // Fallback to lightweight analyses
+      try {
+        const lightAnalyses = JSON.parse(localStorage.getItem('myAnalysesLight') || '[]');
+        if (lightAnalyses.length > 0) {
+          const last = lightAnalyses[lightAnalyses.length - 1];
+          console.log('Using last lightweight analysis result:', last);
+          
+          return {
+            success: last.success !== false,
+            processed: true,
+            summary: last.summary || { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
+            results: last.results || [],
+            processedData: []
+          };
+        }
+      } catch (error) {
+        console.warn('Failed to load from lightweight analyses:', error);
       }
       
-      const last = allAnalyses[allAnalyses.length - 1];
-      console.log('Using last analysis result:', last);
-      
-      return {
-        success: last.success !== false,
-        processed: true,
-        summary: last.summary || { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
-        results: last.results || [],
-        processedData: last.processedData || []
-      };
+      console.log('No analyses found in any storage');
+      return null;
     } catch (error) {
       console.error('Error loading last result:', error);
       return null;

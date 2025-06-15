@@ -48,35 +48,31 @@ const Results = () => {
   }, []);
 
   const handlePreview = () => {
-    if (!results?.processedData || results.processedData.length === 0) {
+    if (!results?.processed) {
       toast({
-        title: "No data to preview",
+        title: "No analysis results",
         description: "Run an analysis workflow first to generate results.",
         variant: "destructive"
       });
       return;
     }
 
-    // Create a preview of the results data
-    const previewData = results.processedData.map((sample: any) => ({
-      fileName: sample.fileName,
-      peaksDetected: sample.detectedPeaks?.length || 0,
-      compoundsIdentified: sample.identifiedCompounds?.length || 0,
-      totalSpectra: sample.totalSpectra || 0
-    }));
+    // Show summary even if processedData is limited
+    const summary = results.summary || {};
+    const message = results.processedData && results.processedData.length > 0 
+      ? `Analysis completed: ${summary.peaksDetected || 0} peaks detected, ${summary.compoundsIdentified || 0} compounds identified in ${results.processedData.length} samples.`
+      : `Analysis completed: ${summary.peaksDetected || 0} peaks detected, ${summary.compoundsIdentified || 0} compounds identified. Processing time: ${summary.processingTime || 0}s.`;
 
-    console.log('Preview data:', previewData);
-    
     toast({
-      title: "Results Preview",
-      description: `Found ${previewData.length} processed samples with ${results.summary?.peaksDetected || 0} total peaks detected.`
+      title: "Analysis Results Preview",
+      description: message
     });
   };
 
   const handleExportResults = () => {
-    if (!results?.processedData || results.processedData.length === 0) {
+    if (!results?.processed) {
       toast({
-        title: "No data to export",
+        title: "No analysis results",
         description: "Run an analysis workflow first to generate results.",
         variant: "destructive"
       });
@@ -84,8 +80,8 @@ const Results = () => {
     }
 
     try {
-      // Create comprehensive CSV content from processed data
-      const csvContent = generateComprehensiveCSV(results);
+      // Create CSV content from available data
+      const csvContent = generateExportCSV(results);
       
       // Create and download file
       const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -112,41 +108,32 @@ const Results = () => {
     }
   };
 
-  const generateComprehensiveCSV = (results: any) => {
-    let csvContent = 'Sample,PeaksDetected,CompoundsIdentified,ProcessingStatus\n';
+  const generateExportCSV = (results: any) => {
+    let csvContent = 'Analysis Summary\n';
+    csvContent += `Date,${new Date().toISOString()}\n`;
+    csvContent += `Peaks Detected,${results.summary?.peaksDetected || 0}\n`;
+    csvContent += `Compounds Identified,${results.summary?.compoundsIdentified || 0}\n`;
+    csvContent += `Processing Time,${results.summary?.processingTime || 0}s\n\n`;
+    
+    csvContent += 'Processing Steps\n';
+    csvContent += 'Step,Status,Message\n';
+    if (results.results && results.results.length > 0) {
+      results.results.forEach((step: any) => {
+        csvContent += `${step.stepName},${step.success ? 'Success' : 'Failed'},"${step.message || ''}"\n`;
+      });
+    }
     
     if (results.processedData && results.processedData.length > 0) {
+      csvContent += '\nSample Details\n';
+      csvContent += 'Sample,Peaks,Compounds,Status\n';
       results.processedData.forEach((sample: any) => {
         const peaksCount = sample.detectedPeaks?.length || 0;
         const compoundsCount = sample.identifiedCompounds?.length || 0;
-        const status = sample.processingStatus || 'completed';
-        
+        const status = sample.processingStatus || 'unknown';
         csvContent += `${sample.fileName || 'Unknown'},${peaksCount},${compoundsCount},${status}\n`;
-        
-        // Add detailed peak information if available
-        if (sample.detectedPeaks && sample.detectedPeaks.length > 0) {
-          csvContent += '\nPeak Details:\n';
-          csvContent += 'Peak_ID,Mass,Intensity,RetentionTime\n';
-          
-          sample.detectedPeaks.forEach((peak: any, index: number) => {
-            csvContent += `Peak_${index + 1},${peak.mz || peak.mass || 0},${peak.intensity || 0},${peak.rt || peak.retentionTime || 0}\n`;
-          });
-        }
-        
-        // Add compound identification details if available
-        if (sample.identifiedCompounds && sample.identifiedCompounds.length > 0) {
-          csvContent += '\nCompound Details:\n';
-          csvContent += 'Compound_Name,Formula,Mass,MatchScore\n';
-          
-          sample.identifiedCompounds.forEach((compound: any) => {
-            csvContent += `${compound.name || 'Unknown'},${compound.formula || ''},${compound.mass || 0},${compound.matchScore || compound.score || 0}\n`;
-          });
-        }
-        
-        csvContent += '\n';
       });
     } else {
-      csvContent += 'No processed data available\n';
+      csvContent += '\nNote: Detailed sample data not available due to storage limitations\n';
     }
     
     return csvContent;
@@ -174,7 +161,7 @@ const Results = () => {
               </Button>
               <Button 
                 className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
-                disabled={!results?.processed || !results?.processedData?.length}
+                disabled={!results?.processed}
                 onClick={handleExportResults}
               >
                 <Download className="w-4 h-4 mr-2" />
@@ -198,7 +185,7 @@ const Results = () => {
               <span>• Peaks Detected: {results.summary.peaksDetected || 0}</span>
               <span>• Compounds Identified: {results.summary.compoundsIdentified || 0}</span>
               <span>• Processing Time: {results.summary.processingTime || 0}s</span>
-              <span>• Samples Processed: {results.processedData?.length || 0}</span>
+              <span>• Samples Processed: {results.sampleCount || results.processedData?.length || 0}</span>
             </div>
           )}
         </div>
