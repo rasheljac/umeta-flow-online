@@ -88,7 +88,6 @@ const DataVisualization = ({
   const showTimeSeries = sampleType === "Serum";
 
   const enabledTabs = {
-    spectra: true,
     chromatograms: true,
     intensity: statisticsStepSucceeded,
     pca: statisticsStepSucceeded,
@@ -324,7 +323,6 @@ const DataVisualization = ({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="spectra">Mass Spectra</SelectItem>
             <SelectItem value="chromatograms">Chromatograms</SelectItem>
             <SelectItem value="intensity" disabled={!enabledTabs.intensity}>Compound Intensities</SelectItem>
             <SelectItem value="pca" disabled={!enabledTabs.pca}>PCA Analysis</SelectItem>
@@ -335,11 +333,7 @@ const DataVisualization = ({
       </div>
 
       <Tabs value={selectedChart} onValueChange={setSelectedChart}>
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="spectra">
-            <Zap className="w-4 h-4 mr-2" />
-            Mass Spectra
-          </TabsTrigger>
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="chromatograms">
             <Clock className="w-4 h-4 mr-2" />
             Chromatograms
@@ -362,22 +356,12 @@ const DataVisualization = ({
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="spectra">
-          <Card>
-            <CardHeader>
-              <CardTitle>Mass Spectrum Viewer</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <MassSpectrumViewer data={filteredData} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="chromatograms">
           <div className="space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle>Chromatogram Viewer</CardTitle>
+                <p className="text-sm text-slate-600">Click on any point in the chromatogram to view the corresponding mass spectrum below</p>
               </CardHeader>
               <CardContent>
                 <ChromatogramViewer data={filteredData} />
