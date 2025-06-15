@@ -1,7 +1,7 @@
-
 import { useState } from "react";
 import FileUpload from "@/components/FileUpload";
 import ChromatogramViewer from "@/components/ChromatogramViewer";
+import DataVisualization from "@/components/DataVisualization";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ParsedMzData } from "@/utils/mzParser";
@@ -12,6 +12,18 @@ const Index = () => {
 
   const handleFileUpload = (files: File[]) => {
     console.log("Files uploaded:", files);
+    
+    // Load the parsed data from localStorage which is set by FileUpload component
+    const storedData = localStorage.getItem('uploadedMzData');
+    if (storedData) {
+      try {
+        const parsed = JSON.parse(storedData);
+        setUploadedData(parsed);
+        console.log('Updated uploadedData state with:', parsed.length, 'files');
+      } catch (error) {
+        console.error('Failed to load uploaded data:', error);
+      }
+    }
   };
 
   return (
@@ -115,11 +127,11 @@ const Index = () => {
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <TrendingUp className="w-5 h-5" />
-                  <span>Chromatogram Visualization</span>
+                  <span>Data Visualization</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ChromatogramViewer data={uploadedData} />
+                <DataVisualization results={null} uploadedDataOverride={uploadedData} />
               </CardContent>
             </Card>
           </TabsContent>

@@ -207,7 +207,10 @@ const FileUpload = ({ onFileUpload }: FileUploadProps) => {
       // Store parsed data in localStorage for workflow engine
       localStorage.setItem('uploadedMzData', JSON.stringify(newParsedData));
       
-      onFileUpload(files);
+      // Call the callback after a brief delay to ensure localStorage is updated
+      setTimeout(() => {
+        onFileUpload(files);
+      }, 100);
       
       toast({
         title: "Files processed successfully",
