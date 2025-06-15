@@ -459,7 +459,6 @@ const DataVisualization = ({
                       <XAxis dataKey="PC1" name="Total Intensity" label={{ value: 'Total Intensity (normalized)', position: 'insideBottom', offset: -5 }} />
                       <YAxis dataKey="PC2" name="Compound Count" label={{ value: 'Compound Count', angle: -90, position: 'insideLeft' }} />
                       <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                      {/* ... keep existing code for scatter plots */}
                       <Scatter 
                         name="Group A" 
                         data={pcaData.filter(d => d.group === 'Group A')}
