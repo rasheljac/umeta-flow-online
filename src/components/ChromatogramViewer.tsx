@@ -58,11 +58,16 @@ const ChromatogramViewer = ({ data }: ChromatogramViewerProps) => {
     }
   };
 
-  // Prepare spectrum data for visualization
+  // Prepare spectrum data for visualization - show ALL peaks, not just 30
   const spectrumData = selectedSpectrum ? selectedSpectrum.peaks.map((peak: any) => ({
     mz: peak.mz,
     intensity: peak.intensity
   })) : [];
+
+  // Custom formatter for x-axis to show one decimal place
+  const formatMzValue = (value: number) => {
+    return value.toFixed(1);
+  };
 
   return (
     <div className="space-y-6">
@@ -179,6 +184,7 @@ const ChromatogramViewer = ({ data }: ChromatogramViewerProps) => {
                     type="number"
                     scale="linear"
                     domain={['dataMin', 'dataMax']}
+                    tickFormatter={formatMzValue}
                     label={{ value: 'm/z', position: 'insideBottom', offset: -5 }}
                   />
                   <YAxis 
@@ -189,7 +195,7 @@ const ChromatogramViewer = ({ data }: ChromatogramViewerProps) => {
                       typeof value === 'number' ? value.toLocaleString() : value, 
                       name === 'intensity' ? 'Intensity' : name
                     ]}
-                    labelFormatter={(label) => `m/z: ${typeof label === 'number' ? label.toFixed(4) : label}`}
+                    labelFormatter={(label) => `m/z: ${typeof label === 'number' ? label.toFixed(1) : label}`}
                   />
                   <Bar 
                     dataKey="intensity" 
