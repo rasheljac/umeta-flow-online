@@ -1,5 +1,5 @@
 import { useState, useEffect, ChangeEvent } from "react";
-import { Plus, Settings, Trash2, ChevronDown, ChevronRight, Upload } from "lucide-react";
+import { Plus, Settings, Trash2, ChevronDown, ChevronRight, Upload, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -110,6 +110,8 @@ const WorkflowBuilder = ({
   onMs2DbFileChange
 }: WorkflowBuilderProps) => {
   const [selectedStepType, setSelectedStepType] = useState("");
+  const [compoundListFile, setCompoundListFile] = useState<File | null>(null);
+  const [compoundListData, setCompoundListData] = useState<any[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -328,6 +330,76 @@ const WorkflowBuilder = ({
     }
   };
 
+  // New function to handle CSV compound list upload
+  const handleCompoundListChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      const file = event.target.files[0];
+      setCompoundListFile(file);
+      
+      try {
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        const headers = lines[0].split(',').map(h => h.trim());
+        
+        // Validate headers
+        const requiredHeaders = ['compound', 'formula', 'id', 'rt', 'category'];
+        const hasAllHeaders = requiredHeaders.every(header => 
+          headers.some(h => h.toLowerCase().includes(header))
+        );
+        
+        if (!hasAllHeaders) {
+          toast({
+            title: "Invalid CSV format",
+            description: "CSV must contain columns: compound, formula, id, rt, category",
+            variant: "destructive"
+          });
+          setCompoundListFile(null);
+          setCompoundListData([]);
+          return;
+        }
+        
+        // Parse data
+        const data = lines.slice(1).map(line => {
+          const values = line.split(',').map(v => v.trim());
+          const entry: any = {};
+          headers.forEach((header, index) => {
+            const normalizedHeader = header.toLowerCase();
+            if (normalizedHeader.includes('compound')) entry.compound = values[index];
+            else if (normalizedHeader.includes('formula')) entry.formula = values[index];
+            else if (normalizedHeader.includes('id')) entry.id = values[index];
+            else if (normalizedHeader.includes('rt')) entry.rt = parseFloat(values[index]) || 0;
+            else if (normalizedHeader.includes('category')) entry.category = values[index];
+          });
+          return entry;
+        }).filter(entry => entry.compound && entry.formula);
+        
+        setCompoundListData(data);
+        
+        // Store in localStorage for use during processing
+        localStorage.setItem('compoundListData', JSON.stringify(data));
+        
+        toast({
+          title: "Compound list uploaded",
+          description: `Successfully loaded ${data.length} compounds for MS1 identification`,
+        });
+        
+      } catch (error) {
+        console.error('Failed to parse compound list:', error);
+        toast({
+          title: "Upload failed",
+          description: "Failed to parse the CSV file. Please check the format.",
+          variant: "destructive"
+        });
+        setCompoundListFile(null);
+        setCompoundListData([]);
+      }
+    } else {
+      setCompoundListFile(null);
+      setCompoundListData([]);
+      localStorage.removeItem('compoundListData');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Workflow Name */}
@@ -364,6 +436,48 @@ const WorkflowBuilder = ({
           }
         </div>
         <span className="text-xs text-slate-500">Supported: .json, .mgf, .msp</span>
+      </div>
+
+      {/* NEW: Compound List CSV Upload for MS1 Identification */}
+      <div>
+        <Label htmlFor="compound-list-upload" className="mb-1 block font-bold">
+          Compound List (CSV, for MS1 identification)
+        </Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="compound-list-upload"
+            type="file"
+            accept=".csv"
+            className="w-auto"
+            onChange={handleCompoundListChange}
+            disabled={!hasFiles}
+          />
+          {compoundListFile && (
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-green-600" />
+              <span className="text-xs text-green-700">{compoundListFile.name}</span>
+              <span className="text-xs text-slate-600">({compoundListData.length} compounds)</span>
+            </div>
+          )}
+        </div>
+        <div className="text-xs text-slate-500 mt-1">
+          CSV format: compound, formula, id, rt, category
+        </div>
+        {compoundListData.length > 0 && (
+          <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm">
+            <div className="font-medium text-green-800">Preview (first 3 compounds):</div>
+            {compoundListData.slice(0, 3).map((compound, idx) => (
+              <div key={idx} className="text-green-700 text-xs">
+                {compound.compound} ({compound.formula}) - RT: {compound.rt}min
+              </div>
+            ))}
+            {compoundListData.length > 3 && (
+              <div className="text-green-600 text-xs">
+                ...and {compoundListData.length - 3} more compounds
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sample type and ordering */}
