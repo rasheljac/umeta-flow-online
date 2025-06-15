@@ -1,5 +1,5 @@
 import { useState, useEffect, ChangeEvent } from "react";
-import { Plus, Settings, Trash2, ChevronDown, ChevronRight, Upload, FileText } from "lucide-react";
+import { Plus, Settings, Trash2, ChevronDown, ChevronRight, Upload, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -400,8 +400,45 @@ const WorkflowBuilder = ({
     }
   };
 
+  // New function to remove uploaded files
+  const handleRemoveUploadedFiles = () => {
+    localStorage.removeItem('uploadedMzData');
+    localStorage.removeItem('compoundListData');
+    setCompoundListFile(null);
+    setCompoundListData([]);
+    
+    toast({
+      title: "Files removed",
+      description: "All uploaded files have been removed from the workflow.",
+    });
+    
+    // Trigger a page refresh or parent component update
+    window.location.reload();
+  };
+
   return (
     <div className="space-y-6">
+      {/* File Management Section */}
+      {hasFiles && (
+        <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <Label className="font-bold">Uploaded Files ({uploadedFiles.length})</Label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRemoveUploadedFiles}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Remove All Files
+            </Button>
+          </div>
+          <div className="text-sm text-slate-600">
+            {uploadedFiles.map(file => file.fileName).join(', ')}
+          </div>
+        </div>
+      )}
+
       {/* Workflow Name */}
       <div className="mb-2">
         <Label htmlFor="workflow-name" className="mb-1 block font-bold">
@@ -457,6 +494,22 @@ const WorkflowBuilder = ({
               <FileText className="w-4 h-4 text-green-600" />
               <span className="text-xs text-green-700">{compoundListFile.name}</span>
               <span className="text-xs text-slate-600">({compoundListData.length} compounds)</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setCompoundListFile(null);
+                  setCompoundListData([]);
+                  localStorage.removeItem('compoundListData');
+                  toast({
+                    title: "Compound list removed",
+                    description: "Compound list has been removed from the workflow.",
+                  });
+                }}
+                className="text-red-500 hover:text-red-700 p-1 h-auto"
+              >
+                <X className="w-3 h-3" />
+              </Button>
             </div>
           )}
         </div>

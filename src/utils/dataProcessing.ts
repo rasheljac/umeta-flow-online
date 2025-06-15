@@ -1,4 +1,3 @@
-
 import { ParsedMzData, Spectrum } from './mzParser';
 
 export interface Peak {
@@ -413,32 +412,59 @@ export const identifyCompounds = async (
   
   const identifiedCompounds: IdentifiedCompound[] = [];
   
+  // Get uploaded compound list from localStorage
+  let uploadedCompounds: any[] = [];
+  try {
+    const storedCompoundList = localStorage.getItem('compoundListData');
+    if (storedCompoundList) {
+      uploadedCompounds = JSON.parse(storedCompoundList);
+      console.log(`Using uploaded compound list with ${uploadedCompounds.length} compounds`);
+    }
+  } catch (error) {
+    console.warn('Failed to load uploaded compound list:', error);
+  }
+  
+  // Use uploaded compounds if available, otherwise fall back to built-in database
+  const compoundsToSearch = uploadedCompounds.length > 0 ? uploadedCompounds : COMPOUND_DATABASE;
+  
+  console.log(`Searching against ${compoundsToSearch.length} compounds`);
+  
   data.forEach(sample => {
     const peaks = sample.normalizedPeaks || sample.filteredPeaks || sample.alignedPeaks || sample.detectedPeaks || [];
     
     peaks.forEach((peak: Peak) => {
       // Find matching compounds within mass tolerance
-      const matches = COMPOUND_DATABASE.filter(compound => {
-        const massDiff = Math.abs(peak.mz - compound.mass);
+      const matches = compoundsToSearch.filter(compound => {
+        // Handle both uploaded CSV format and built-in database format
+        const compoundMass = compound.mass || calculateMassFromFormula(compound.formula);
+        const massDiff = Math.abs(peak.mz - compoundMass);
         return massDiff <= mass_tolerance;
       });
       
       matches.forEach(compound => {
-        const massDiff = Math.abs(peak.mz - compound.mass);
-        const matchScore = 1 - (massDiff / mass_tolerance);
+        const compoundMass = compound.mass || calculateMassFromFormula(compound.formula);
+        const massDiff = Math.abs(peak.mz - compoundMass);
+        const matchScore = Math.max(0, 1 - (massDiff / mass_tolerance));
+        
+        // Handle both CSV format (compound field) and built-in format (name field)
+        const compoundName = compound.compound || compound.name;
         
         identifiedCompounds.push({
-          id: `${compound.name}_${peak.mz.toFixed(4)}_${sample.fileName}`,
-          name: compound.name,
+          id: `${compoundName}_${peak.mz.toFixed(4)}_${sample.fileName}`,
+          name: compoundName,
           formula: compound.formula,
-          mass: compound.mass,
+          mass: compoundMass,
           matchScore,
-          database,
+          database: uploadedCompounds.length > 0 ? 'Uploaded CSV' : database,
           peaks: [peak]
         });
       });
     });
   });
+  
+  const sourceInfo = uploadedCompounds.length > 0 
+    ? `uploaded CSV (${uploadedCompounds.length} compounds)` 
+    : `${database} (${COMPOUND_DATABASE.length} compounds)`;
   
   return {
     data: data.map((sample, index) => ({
@@ -446,9 +472,34 @@ export const identifyCompounds = async (
       identifiedCompounds: identifiedCompounds.filter(c => c.id.endsWith(sample.fileName))
     })),
     compoundsIdentified: identifiedCompounds.length,
-    message: `Identified ${identifiedCompounds.length} compounds from ${database} within ${mass_tolerance} Da tolerance`
+    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} within ${mass_tolerance} Da tolerance`
   };
 };
+
+// Helper function to calculate molecular mass from formula (basic implementation)
+function calculateMassFromFormula(formula: string): number {
+  if (!formula) return 0;
+  
+  // Basic atomic masses
+  const atomicMasses: { [key: string]: number } = {
+    'C': 12.011, 'H': 1.008, 'O': 15.999, 'N': 14.007, 
+    'S': 32.066, 'P': 30.974, 'Cl': 35.453, 'Br': 79.904,
+    'F': 18.998, 'I': 126.904, 'Na': 22.990, 'K': 39.098,
+    'Ca': 40.078, 'Mg': 24.305, 'Fe': 55.845, 'Zn': 65.380
+  };
+  
+  let mass = 0;
+  const regex = /([A-Z][a-z]?)(\d*)/g;
+  let match;
+  
+  while ((match = regex.exec(formula)) !== null) {
+    const element = match[1];
+    const count = parseInt(match[2]) || 1;
+    mass += (atomicMasses[element] || 0) * count;
+  }
+  
+  return mass;
+}
 
 export const performStatistics = async (
   data: any[], 
