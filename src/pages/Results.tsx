@@ -1,3 +1,4 @@
+
 import { FileText, Download, Eye, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,9 +7,11 @@ import DataVisualization from "@/components/DataVisualization";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
 import { processingService } from "@/services/processingService";
+import { ParsedMzData } from "@/utils/mzParser";
 
 const Results = () => {
   const [results, setResults] = useState(null);
+  const [uploadedData, setUploadedData] = useState<ParsedMzData[]>([]);
 
   useEffect(() => {
     // Load results from processing service
@@ -19,7 +22,7 @@ const Results = () => {
         peaksDetected: lastResult.summary.peaksDetected,
         compoundsIdentified: lastResult.summary.compoundsIdentified,
         processingTime: lastResult.summary.processingTime,
-        steps: lastResult.results
+        results: lastResult.results
       });
     } else {
       // Fallback to mock data if no results available
@@ -30,6 +33,18 @@ const Results = () => {
         processingTime: 0,
         message: "No analysis results available. Please run a workflow first."
       });
+    }
+
+    // Load uploaded data for visualization
+    const storedData = localStorage.getItem('uploadedMzData');
+    if (storedData) {
+      try {
+        const parsed = JSON.parse(storedData);
+        setUploadedData(parsed);
+        console.log('Loaded uploaded data for results:', parsed.length, 'files');
+      } catch (error) {
+        console.error('Failed to load uploaded data:', error);
+      }
     }
   }, []);
 
@@ -70,7 +85,7 @@ const Results = () => {
           </p>
         </div>
 
-        <Tabs defaultValue="results" className="space-y-6">
+        <Tabs defaultValue="visualize" className="space-y-6">
           <TabsList className="grid w-full grid-cols-2 lg:w-fit">
             <TabsTrigger value="results" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
@@ -105,7 +120,10 @@ const Results = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <DataVisualization results={results} />
+                <DataVisualization 
+                  results={results} 
+                  uploadedDataOverride={uploadedData}
+                />
               </CardContent>
             </Card>
           </TabsContent>

@@ -1,14 +1,17 @@
+
 import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TrendingUp, BarChart3, PieChart as PieChartIcon, Target, Zap, Clock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { TrendingUp, BarChart3, PieChart as PieChartIcon, Target, Zap, Clock, Filter } from "lucide-react";
 import MassSpectrumViewer from "./MassSpectrumViewer";
 import ChromatogramViewer from "./ChromatogramViewer";
 import { ParsedMzData } from "@/utils/mzParser";
 
-// Added new props for workflow summary, steps, sampleType, sampleOrder
 interface DataVisualizationProps {
   results: any;
   workflowSteps?: any[];
@@ -17,10 +20,16 @@ interface DataVisualizationProps {
   uploadedDataOverride?: ParsedMzData[];
 }
 
+interface ChromatogramFilters {
+  polarity: "positive" | "negative" | "all";
+  scanRangeMin: number;
+  scanRangeMax: number;
+  mzTarget: number | null;
+  mzTolerance: number;
+}
+
 const generateMockData = () => {
-  // Generate mock metabolomics data for visualization
   const compounds = ['Glucose', 'Lactate', 'Pyruvate', 'Citrate', 'Succinate', 'Fumarate', 'Malate', 'Alanine', 'Glycine', 'Serine'];
-  const groups = ['Control', 'Treatment'];
   
   const intensityData = compounds.map(compound => ({
     compound,
@@ -60,13 +69,18 @@ const DataVisualization = ({
   sampleOrder = [],
   uploadedDataOverride = undefined,
 }: DataVisualizationProps) => {
-  // Detect workflow run and statistics step success
-  const [selectedChart, setSelectedChart] = useState("intensity");
+  const [selectedChart, setSelectedChart] = useState("chromatograms");
   const [uploadedData, setUploadedData] = useState<ParsedMzData[]>([]);
+  const [filters, setFilters] = useState<ChromatogramFilters>({
+    polarity: "all",
+    scanRangeMin: 0,
+    scanRangeMax: 1000,
+    mzTarget: null,
+    mzTolerance: 0.01
+  });
   const mockData = generateMockData();
 
   useEffect(() => {
-    // Load uploaded mzML/mzXML data for visualization
     if (uploadedDataOverride) {
       setUploadedData(uploadedDataOverride);
       return;
@@ -76,25 +90,39 @@ const DataVisualization = ({
       try {
         const parsed = JSON.parse(storedData);
         setUploadedData(parsed);
+        console.log('Loaded uploaded data for visualization:', parsed.length, 'files');
       } catch (error) {
         console.error('Failed to load uploaded data:', error);
       }
     }
   }, [uploadedDataOverride]);
 
+  // Update scan range when data changes
+  useEffect(() => {
+    if (uploadedData.length > 0) {
+      const allSpectra = uploadedData.flatMap(file => file.spectra);
+      if (allSpectra.length > 0) {
+        const minScan = Math.min(...allSpectra.map(s => s.scanNumber));
+        const maxScan = Math.max(...allSpectra.map(s => s.scanNumber));
+        setFilters(prev => ({
+          ...prev,
+          scanRangeMin: minScan,
+          scanRangeMax: maxScan
+        }));
+      }
+    }
+  }, [uploadedData]);
+
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
 
-  // Check if statistics step is present and succeeded
   const statisticsStepSucceeded = useMemo(() => {
     if (!results?.results) return false;
     const statsStep = results.results.find((s: any) => s.stepName === "Statistical Analysis" && s.success);
     return !!statsStep;
   }, [results]);
 
-  // Check for sampleType / serum and whether to allow timeseries
   const showTimeSeries = sampleType === "Serum";
 
-  // Tabs visibility logic
   const enabledTabs = {
     spectra: true,
     chromatograms: true,
@@ -104,27 +132,132 @@ const DataVisualization = ({
     timeseries: showTimeSeries,
   };
 
-  // Handle sample ordering for Time Series tab
-  let orderedTimeSeriesData = mockData.timeSeriesData;
-  if (showTimeSeries && uploadedData.length && sampleOrder.length === uploadedData.length) {
-    orderedTimeSeriesData = [...mockData.timeSeriesData];
-    // (Optional) Sort real data according to sampleOrder, and pass to charts as needed.
-    // For this mock, simply shuffle or order accordingly if you have real mapping
-    // In a real implementation you'd use actual sample/meta data!
-  }
+  const extractMzChromatogram = (mzTarget: number, tolerance: number) => {
+    if (!uploadedData.length || !mzTarget) return null;
 
-  if (!results || !results.processed) {
+    const extractedData: { time: number; intensity: number }[] = [];
+    
+    uploadedData.forEach(file => {
+      file.spectra.forEach(spectrum => {
+        const matchingPeaks = spectrum.peaks.filter(peak => 
+          Math.abs(peak.mz - mzTarget) <= tolerance
+        );
+        
+        if (matchingPeaks.length > 0) {
+          const totalIntensity = matchingPeaks.reduce((sum, peak) => sum + peak.intensity, 0);
+          extractedData.push({
+            time: spectrum.retentionTime,
+            intensity: totalIntensity
+          });
+        }
+      });
+    });
+
+    return extractedData.sort((a, b) => a.time - b.time);
+  };
+
+  const filteredData = useMemo(() => {
+    if (!uploadedData.length) return uploadedData;
+
+    return uploadedData.map(file => ({
+      ...file,
+      spectra: file.spectra.filter(spectrum => 
+        spectrum.scanNumber >= filters.scanRangeMin && 
+        spectrum.scanNumber <= filters.scanRangeMax
+      )
+    }));
+  }, [uploadedData, filters.scanRangeMin, filters.scanRangeMax]);
+
+  const mzChromatogramData = useMemo(() => {
+    if (filters.mzTarget) {
+      return extractMzChromatogram(filters.mzTarget, filters.mzTolerance);
+    }
+    return null;
+  }, [uploadedData, filters.mzTarget, filters.mzTolerance]);
+
+  // Show message if no data is available
+  if (!uploadedData.length && !results?.processed) {
     return (
       <div className="text-center py-12 text-slate-500">
         <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-        <p>No analysis results to visualize yet.</p>
-        <p className="text-sm">Run your workflow to generate visualizations.</p>
+        <p>No data available for visualization.</p>
+        <p className="text-sm">Please upload files first to see chromatograms and spectra.</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Filters Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Filter className="w-5 h-5" />
+            <span>Data Filters</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div>
+              <Label htmlFor="polarity">Polarity</Label>
+              <Select value={filters.polarity} onValueChange={(value: any) => setFilters(prev => ({ ...prev, polarity: value }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="positive">Positive</SelectItem>
+                  <SelectItem value="negative">Negative</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
+              <Label htmlFor="scanMin">Scan Range Min</Label>
+              <Input
+                id="scanMin"
+                type="number"
+                value={filters.scanRangeMin}
+                onChange={(e) => setFilters(prev => ({ ...prev, scanRangeMin: parseInt(e.target.value) || 0 }))}
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="scanMax">Scan Range Max</Label>
+              <Input
+                id="scanMax"
+                type="number"
+                value={filters.scanRangeMax}
+                onChange={(e) => setFilters(prev => ({ ...prev, scanRangeMax: parseInt(e.target.value) || 1000 }))}
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="mzTarget">Target m/z</Label>
+              <Input
+                id="mzTarget"
+                type="number"
+                step="0.0001"
+                placeholder="e.g., 200.1234"
+                value={filters.mzTarget || ''}
+                onChange={(e) => setFilters(prev => ({ ...prev, mzTarget: parseFloat(e.target.value) || null }))}
+              />
+            </div>
+            
+            <div>
+              <Label htmlFor="mzTolerance">m/z Tolerance</Label>
+              <Input
+                id="mzTolerance"
+                type="number"
+                step="0.0001"
+                value={filters.mzTolerance}
+                onChange={(e) => setFilters(prev => ({ ...prev, mzTolerance: parseFloat(e.target.value) || 0.01 }))}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold text-slate-900">Data Visualizations</h3>
         <Select value={selectedChart} onValueChange={setSelectedChart}>
@@ -144,19 +277,29 @@ const DataVisualization = ({
 
       <Tabs value={selectedChart} onValueChange={setSelectedChart}>
         <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="spectra"> <Zap className="w-4 h-4 mr-2" /> Mass Spectra </TabsTrigger>
-          <TabsTrigger value="chromatograms"><Clock className="w-4 h-4 mr-2" /> Chromatograms </TabsTrigger>
+          <TabsTrigger value="spectra">
+            <Zap className="w-4 h-4 mr-2" />
+            Mass Spectra
+          </TabsTrigger>
+          <TabsTrigger value="chromatograms">
+            <Clock className="w-4 h-4 mr-2" />
+            Chromatograms
+          </TabsTrigger>
           <TabsTrigger value="intensity" disabled={!enabledTabs.intensity}>
-            <BarChart3 className="w-4 h-4 mr-2" /> Intensities
+            <BarChart3 className="w-4 h-4 mr-2" />
+            Intensities
           </TabsTrigger>
           <TabsTrigger value="pca" disabled={!enabledTabs.pca}>
-            <Target className="w-4 h-4 mr-2" /> PCA
+            <Target className="w-4 h-4 mr-2" />
+            PCA
           </TabsTrigger>
           <TabsTrigger value="pathway" disabled={!enabledTabs.pathway}>
-            <PieChartIcon className="w-4 h-4 mr-2" /> Pathways
+            <PieChartIcon className="w-4 h-4 mr-2" />
+            Pathways
           </TabsTrigger>
           <TabsTrigger value="timeseries" disabled={!enabledTabs.timeseries}>
-            <TrendingUp className="w-4 h-4 mr-2" /> Time Series
+            <TrendingUp className="w-4 h-4 mr-2" />
+            Time Series
           </TabsTrigger>
         </TabsList>
 
@@ -166,20 +309,58 @@ const DataVisualization = ({
               <CardTitle>Mass Spectrum Viewer</CardTitle>
             </CardHeader>
             <CardContent>
-              <MassSpectrumViewer data={uploadedData} />
+              <MassSpectrumViewer data={filteredData} />
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="chromatograms">
-          <Card>
-            <CardHeader>
-              <CardTitle>Chromatogram Viewer</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ChromatogramViewer data={uploadedData} />
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Chromatogram Viewer</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ChromatogramViewer data={filteredData} />
+              </CardContent>
+            </Card>
+
+            {/* Extracted Ion Chromatogram */}
+            {mzChromatogramData && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Extracted Ion Chromatogram (m/z {filters.mzTarget})</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={mzChromatogramData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="time" 
+                          label={{ value: 'Retention Time (min)', position: 'insideBottom', offset: -5 }}
+                        />
+                        <YAxis 
+                          label={{ value: 'Intensity', angle: -90, position: 'insideLeft' }}
+                        />
+                        <Tooltip 
+                          formatter={(value) => [typeof value === 'number' ? value.toLocaleString() : value, 'Intensity']}
+                          labelFormatter={(label) => `RT: ${typeof label === 'number' ? label.toFixed(2) : label} min`}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="intensity" 
+                          stroke="#3B82F6" 
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="intensity">
@@ -310,7 +491,7 @@ const DataVisualization = ({
             <CardContent>
               <div className="h-96">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={orderedTimeSeriesData}>
+                  <LineChart data={mockData.timeSeriesData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
                     <YAxis />
