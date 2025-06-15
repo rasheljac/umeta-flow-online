@@ -1,3 +1,4 @@
+
 import { ParsedMzData, Spectrum } from './mzParser';
 
 export interface Peak {
@@ -23,7 +24,7 @@ export interface IdentifiedCompound {
   peaks: Peak[];
 }
 
-// Real compound database for identification
+// Comprehensive compound database
 const COMPOUND_DATABASE = [
   { name: 'Glucose', formula: 'C6H12O6', mass: 180.1559, pathway: 'Glycolysis' },
   { name: 'Lactate', formula: 'C3H6O3', mass: 90.0779, pathway: 'Glycolysis' },
@@ -41,7 +42,7 @@ const COMPOUND_DATABASE = [
   { name: 'Uric acid', formula: 'C5H4N4O3', mass: 168.1103, pathway: 'Purine Metabolism' }
 ];
 
-// Real Peak Detection using local maxima and intensity thresholds
+// Enhanced Peak Detection with robust error handling
 export const detectPeaks = async (
   data: ParsedMzData[], 
   parameters: any
@@ -51,74 +52,111 @@ export const detectPeaks = async (
     
     console.log(`Detecting peaks with threshold: ${noise_threshold}`);
     
-    if (!data || data.length === 0) {
-      throw new Error("No data provided for peak detection");
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error("Invalid data format: expected array of samples");
     }
 
     const allPeaks: Peak[] = [];
+    let processedSamples = 0;
     
     for (const sample of data) {
-      if (!sample.spectra || sample.spectra.length === 0) {
-        console.warn(`Sample ${sample.fileName} has no spectra`);
+      if (!sample || typeof sample !== 'object') {
+        console.warn(`Skipping invalid sample:`, sample);
         continue;
       }
 
+      if (!Array.isArray(sample.spectra) || sample.spectra.length === 0) {
+        console.warn(`Sample ${sample.fileName || 'unknown'} has no valid spectra`);
+        continue;
+      }
+
+      let samplePeaks = 0;
       for (const spectrum of sample.spectra) {
-        if (!spectrum.peaks || spectrum.peaks.length === 0) {
+        if (!spectrum || !Array.isArray(spectrum.peaks) || spectrum.peaks.length === 0) {
           continue;
         }
 
-        // Real peak detection algorithm using local maxima
-        const detectedPeaks = findLocalMaxima(spectrum.peaks, noise_threshold, min_peak_width);
-        
-        const processedPeaks = detectedPeaks.map(peak => ({
-          mz: peak.mz,
-          intensity: peak.intensity,
-          retentionTime: spectrum.retentionTime,
-          area: calculatePeakArea(peak, spectrum.peaks),
-          snRatio: peak.intensity / noise_threshold
-        }));
-        
-        allPeaks.push(...processedPeaks);
+        try {
+          // Enhanced peak detection with validation
+          const detectedPeaks = findLocalMaxima(spectrum.peaks, noise_threshold, min_peak_width);
+          
+          const processedPeaks = detectedPeaks
+            .filter(peak => peak && typeof peak.mz === 'number' && typeof peak.intensity === 'number')
+            .map(peak => ({
+              mz: peak.mz,
+              intensity: peak.intensity,
+              retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
+              area: calculatePeakArea(peak, spectrum.peaks),
+              snRatio: peak.intensity / noise_threshold
+            }));
+          
+          allPeaks.push(...processedPeaks);
+          samplePeaks += processedPeaks.length;
+        } catch (spectrumError) {
+          console.warn(`Error processing spectrum in ${sample.fileName}:`, spectrumError);
+        }
       }
+      
+      console.log(`Sample ${sample.fileName}: detected ${samplePeaks} peaks`);
+      processedSamples++;
     }
     
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Add small delay for UI responsiveness
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // Attach detected peaks to each sample
+    const resultData = data.map(sample => {
+      const samplePeaks = allPeaks.filter(peak => 
+        sample.spectra.some(spectrum => 
+          Math.abs((spectrum.retentionTime || 0) - peak.retentionTime) < 0.001
+        )
+      );
+      
+      return {
+        ...sample,
+        detectedPeaks: samplePeaks
+      };
+    });
     
     return {
-      data: data.map(sample => ({
-        ...sample,
-        detectedPeaks: allPeaks.filter(peak => 
-          sample.spectra.some(spectrum => spectrum.retentionTime === peak.retentionTime)
-        )
-      })),
+      data: resultData,
       peaksDetected: allPeaks.length,
-      message: `Detected ${allPeaks.length} peaks above threshold ${noise_threshold}`
+      message: `Detected ${allPeaks.length} peaks across ${processedSamples} samples`
     };
+    
   } catch (error) {
     console.error('Peak detection error:', error);
     throw new Error(`Peak detection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
 
-// Helper function to find local maxima in peaks
+// Robust helper function to find local maxima
 function findLocalMaxima(peaks: any[], threshold: number, minWidth: number): any[] {
+  if (!Array.isArray(peaks) || peaks.length === 0) {
+    return [];
+  }
+
   const localMaxima = [];
+  const safeMinWidth = Math.max(1, Math.min(minWidth, Math.floor(peaks.length / 4)));
   
-  for (let i = minWidth; i < peaks.length - minWidth; i++) {
+  for (let i = safeMinWidth; i < peaks.length - safeMinWidth; i++) {
     const currentPeak = peaks[i];
     
-    if (!currentPeak || typeof currentPeak.intensity !== 'number' || currentPeak.intensity < threshold) {
+    if (!currentPeak || 
+        typeof currentPeak.intensity !== 'number' || 
+        typeof currentPeak.mz !== 'number' ||
+        currentPeak.intensity < threshold) {
       continue;
     }
     
     let isLocalMaximum = true;
     
-    // Check if current peak is higher than surrounding peaks
-    for (let j = i - minWidth; j <= i + minWidth; j++) {
-      if (j !== i && peaks[j] && peaks[j].intensity >= currentPeak.intensity) {
-        isLocalMaximum = false;
-        break;
+    // Check surrounding peaks
+    for (let j = i - safeMinWidth; j <= i + safeMinWidth && isLocalMaximum; j++) {
+      if (j !== i && peaks[j] && typeof peaks[j].intensity === 'number') {
+        if (peaks[j].intensity >= currentPeak.intensity) {
+          isLocalMaximum = false;
+        }
       }
     }
     
@@ -130,24 +168,41 @@ function findLocalMaxima(peaks: any[], threshold: number, minWidth: number): any
   return localMaxima;
 }
 
-// Helper function to calculate peak area using trapezoidal rule
+// Enhanced peak area calculation
 function calculatePeakArea(peak: any, allPeaks: any[]): number {
-  const peakIndex = allPeaks.findIndex(p => p.mz === peak.mz);
-  const windowSize = 3;
+  if (!peak || !Array.isArray(allPeaks) || allPeaks.length === 0) {
+    return 0;
+  }
+
+  const peakIndex = allPeaks.findIndex(p => 
+    p && Math.abs(p.mz - peak.mz) < 0.001
+  );
+  
+  if (peakIndex === -1) return 0;
+  
+  const windowSize = Math.min(3, Math.floor(allPeaks.length / 4));
   let area = 0;
   
-  for (let i = Math.max(0, peakIndex - windowSize); i < Math.min(allPeaks.length - 1, peakIndex + windowSize); i++) {
+  const startIdx = Math.max(0, peakIndex - windowSize);
+  const endIdx = Math.min(allPeaks.length - 1, peakIndex + windowSize);
+  
+  for (let i = startIdx; i < endIdx; i++) {
     const p1 = allPeaks[i];
     const p2 = allPeaks[i + 1];
-    if (p1 && p2 && typeof p1.intensity === 'number' && typeof p2.intensity === 'number') {
-      area += (p1.intensity + p2.intensity) * (p2.mz - p1.mz) / 2;
+    
+    if (p1 && p2 && 
+        typeof p1.intensity === 'number' && 
+        typeof p2.intensity === 'number' &&
+        typeof p1.mz === 'number' && 
+        typeof p2.mz === 'number') {
+      area += (p1.intensity + p2.intensity) * Math.abs(p2.mz - p1.mz) / 2;
     }
   }
   
-  return area;
+  return Math.max(0, area);
 }
 
-// Real Peak Alignment using m/z and RT tolerances
+// Enhanced Peak Alignment with better error handling
 export const alignPeaks = async (
   data: any[], 
   parameters: any
@@ -157,73 +212,101 @@ export const alignPeaks = async (
     
     console.log(`Aligning peaks with mz tolerance: ${mz_tolerance}, rt tolerance: ${rt_tolerance}`);
     
-    if (!data || data.length === 0) {
-      throw new Error("No data provided for peak alignment");
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error("No valid data provided for peak alignment");
     }
 
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Small delay for UI responsiveness
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     const alignedPeaks: AlignedPeak[] = [];
     let alignmentGroups = 0;
     
-    // Real alignment algorithm
-    const allPeaks = data.flatMap(sample => 
-      (sample.detectedPeaks || []).map((peak: Peak) => ({
-        ...peak,
-        sampleId: sample.fileName
-      }))
-    );
-    
-    // Group peaks by m/z and RT similarity
-    const groups: any[][] = [];
-    
-    for (const peak of allPeaks) {
-      let assigned = false;
+    // Collect all peaks with proper validation
+    const allPeaks = data.flatMap(sample => {
+      if (!sample || !Array.isArray(sample.detectedPeaks)) {
+        return [];
+      }
       
-      for (const group of groups) {
-        const representative = group[0];
-        const mzDiff = Math.abs(peak.mz - representative.mz);
-        const rtDiff = Math.abs(peak.retentionTime - representative.retentionTime);
+      return sample.detectedPeaks
+        .filter(peak => peak && 
+                typeof peak.mz === 'number' && 
+                typeof peak.intensity === 'number' &&
+                typeof peak.retentionTime === 'number')
+        .map((peak: Peak) => ({
+          ...peak,
+          sampleId: sample.fileName || 'unknown'
+        }));
+    });
+    
+    if (allPeaks.length === 0) {
+      return {
+        data: data.map(sample => ({ ...sample, alignedPeaks: [] })),
+        alignmentGroups: 0,
+        message: "No peaks available for alignment"
+      };
+    }
+    
+    // Group peaks by similarity
+    const groups: any[][] = [];
+    const processed = new Set();
+    
+    for (let i = 0; i < allPeaks.length; i++) {
+      if (processed.has(i)) continue;
+      
+      const peak = allPeaks[i];
+      const group = [peak];
+      processed.add(i);
+      
+      // Find similar peaks
+      for (let j = i + 1; j < allPeaks.length; j++) {
+        if (processed.has(j)) continue;
+        
+        const otherPeak = allPeaks[j];
+        const mzDiff = Math.abs(peak.mz - otherPeak.mz);
+        const rtDiff = Math.abs(peak.retentionTime - otherPeak.retentionTime);
         
         if (mzDiff <= mz_tolerance && rtDiff <= rt_tolerance) {
-          group.push(peak);
-          assigned = true;
-          break;
+          group.push(otherPeak);
+          processed.add(j);
         }
       }
       
-      if (!assigned) {
-        groups.push([peak]);
-      }
+      groups.push(group);
     }
     
     alignmentGroups = groups.length;
     
-    // Calculate alignment scores based on group consensus
+    // Calculate alignment scores
     for (const group of groups) {
+      if (group.length === 0) continue;
+      
       const avgMz = group.reduce((sum, p) => sum + p.mz, 0) / group.length;
       const avgRt = group.reduce((sum, p) => sum + p.retentionTime, 0) / group.length;
       
       for (const peak of group) {
-        const mzScore = 1 - Math.abs(peak.mz - avgMz) / mz_tolerance;
-        const rtScore = 1 - Math.abs(peak.retentionTime - avgRt) / rt_tolerance;
+        const mzScore = Math.max(0, 1 - Math.abs(peak.mz - avgMz) / mz_tolerance);
+        const rtScore = Math.max(0, 1 - Math.abs(peak.retentionTime - avgRt) / rt_tolerance);
         const alignmentScore = (mzScore + rtScore) / 2;
         
         alignedPeaks.push({
           ...peak,
-          alignmentScore: Math.max(0, alignmentScore)
+          alignmentScore: Math.max(0, Math.min(1, alignmentScore))
         });
       }
     }
     
+    const resultData = data.map(sample => ({
+      ...sample,
+      alignedPeaks: alignedPeaks.filter(p => p.sampleId === (sample.fileName || 'unknown'))
+    }));
+    
     return {
-      data: data.map(sample => ({
-        ...sample,
-        alignedPeaks: alignedPeaks.filter(p => p.sampleId === sample.fileName)
-      })),
+      data: resultData,
       alignmentGroups,
       message: `Aligned ${allPeaks.length} peaks into ${alignmentGroups} groups`
     };
+    
   } catch (error) {
     console.error('Peak alignment error:', error);
     throw new Error(`Peak alignment failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -269,7 +352,6 @@ export const filterData = async (
   };
 };
 
-// Real Data Normalization using various methods
 export const normalizeData = async (
   data: any[], 
   parameters: any
@@ -319,7 +401,6 @@ export const normalizeData = async (
   };
 };
 
-// Real Compound Identification using mass tolerance matching
 export const identifyCompounds = async (
   data: any[], 
   parameters: any
@@ -369,7 +450,6 @@ export const identifyCompounds = async (
   };
 };
 
-// Real Statistical Analysis with t-tests and fold change
 export const performStatistics = async (
   data: any[], 
   parameters: any

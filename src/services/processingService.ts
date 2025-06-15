@@ -49,28 +49,56 @@ export const processingService = {
     let compoundsIdentified = 0;
     const results: Array<{ stepName: string; success: boolean; message?: string }> = [];
     
-    // Validate input data
+    // Enhanced input validation
     if (!parsedData || parsedData.length === 0) {
-      throw new Error("No data files provided for processing");
+      return {
+        success: false,
+        summary: { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
+        results: [{ stepName: "Input Validation", success: false, message: "No data files provided for processing" }]
+      };
     }
 
     if (!workflowSteps || workflowSteps.length === 0) {
-      throw new Error("No workflow steps defined");
+      return {
+        success: false,
+        summary: { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
+        results: [{ stepName: "Workflow Validation", success: false, message: "No workflow steps defined" }]
+      };
     }
 
     console.log("Starting workflow:", workflowName);
     console.log("Workflow steps:", workflowSteps.map(s => s.name || s.type));
     console.log("Data files:", parsedData.map(d => d.fileName));
 
-    // Initialize data that will be passed through the pipeline
-    let processedData = parsedData.map(sample => ({
-      ...sample,
-      // Ensure required properties exist
-      spectra: sample.spectra || [],
-      chromatograms: sample.chromatograms || [],
-      fileName: sample.fileName || 'unknown',
-      totalSpectra: sample.totalSpectra || 0
-    }));
+    // Initialize and validate data structure
+    let processedData = parsedData.map(sample => {
+      // Ensure all required properties exist with proper defaults
+      const validatedSample = {
+        ...sample,
+        fileName: sample.fileName || 'unknown',
+        totalSpectra: sample.totalSpectra || 0,
+        spectra: Array.isArray(sample.spectra) ? sample.spectra : [],
+        chromatograms: Array.isArray(sample.chromatograms) ? sample.chromatograms : [],
+        // Initialize processing results containers
+        detectedPeaks: [],
+        alignedPeaks: [],
+        filteredPeaks: [],
+        normalizedPeaks: [],
+        identifiedCompounds: [],
+        statisticalResults: null
+      };
+
+      // Validate spectra structure
+      validatedSample.spectra = validatedSample.spectra.map(spectrum => ({
+        ...spectrum,
+        peaks: Array.isArray(spectrum.peaks) ? spectrum.peaks : [],
+        retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
+        scanNumber: typeof spectrum.scanNumber === 'number' ? spectrum.scanNumber : 0,
+        msLevel: typeof spectrum.msLevel === 'number' ? spectrum.msLevel : 1
+      }));
+
+      return validatedSample;
+    });
 
     try {
       for (let i = 0; i < workflowSteps.length; i++) {
@@ -79,33 +107,73 @@ export const processingService = {
         
         console.log(`Processing step ${i + 1}/${workflowSteps.length}: ${step.name || step.type}`);
         
-        window.dispatchEvent(new CustomEvent('workflow-progress', {
-          detail: { currentStep: `Running step: ${step.name || step.type}`, progress }
-        }));
+        // Dispatch progress event
+        try {
+          window.dispatchEvent(new CustomEvent('workflow-progress', {
+            detail: { currentStep: `Running step: ${step.name || step.type}`, progress }
+          }));
+        } catch (progressError) {
+          console.warn('Failed to dispatch progress event:', progressError);
+        }
 
+        // Validate step parameters
+        const stepParams = step.parameters || {};
+        
         try {
           switch (step.type) {
             case "peak_detection":
               console.log("Running Peak Detection...");
-              const peakResult = await detectPeaks(processedData, step.parameters || {});
-              if (!peakResult || !peakResult.data) {
-                throw new Error("Peak detection failed to return valid data");
+              
+              // Validate data has spectra
+              const hasValidSpectra = processedData.some(sample => 
+                sample.spectra && sample.spectra.length > 0 && 
+                sample.spectra.some(spectrum => spectrum.peaks && spectrum.peaks.length > 0)
+              );
+              
+              if (!hasValidSpectra) {
+                throw new Error("No valid spectra data found for peak detection");
               }
+              
+              const peakResult = await detectPeaks(processedData, {
+                noise_threshold: stepParams.noise_threshold || 1000,
+                min_peak_width: stepParams.min_peak_width || 0.1,
+                max_peak_width: stepParams.max_peak_width || 2.0
+              });
+              
+              if (!peakResult || !peakResult.data) {
+                throw new Error("Peak detection returned invalid data");
+              }
+              
               processedData = peakResult.data;
               peaksDetected = peakResult.peaksDetected || 0;
               results.push({ 
                 stepName: "Peak Detection", 
                 success: true, 
-                message: peakResult.message || `Detected ${peaksDetected} peaks`
+                message: `Detected ${peaksDetected} peaks`
               });
               break;
 
             case "alignment":
               console.log("Running Peak Alignment...");
-              const alignResult = await alignPeaks(processedData, step.parameters || {});
-              if (!alignResult || !alignResult.data) {
-                throw new Error("Peak alignment failed to return valid data");
+              
+              // Check if peak detection was run first
+              const hasPeaks = processedData.some(sample => 
+                sample.detectedPeaks && sample.detectedPeaks.length > 0
+              );
+              
+              if (!hasPeaks) {
+                throw new Error("No detected peaks found. Run peak detection first.");
               }
+              
+              const alignResult = await alignPeaks(processedData, {
+                mz_tolerance: stepParams.mz_tolerance || 0.01,
+                rt_tolerance: stepParams.rt_tolerance || 0.5
+              });
+              
+              if (!alignResult || !alignResult.data) {
+                throw new Error("Peak alignment returned invalid data");
+              }
+              
               processedData = alignResult.data;
               results.push({ 
                 stepName: "Peak Alignment", 
@@ -116,10 +184,17 @@ export const processingService = {
 
             case "filtering":
               console.log("Running Data Filtering...");
-              const filterResult = await filterData(processedData, step.parameters || {});
+              
+              const filterResult = await filterData(processedData, {
+                min_intensity: stepParams.min_intensity || 500,
+                cv_threshold: stepParams.cv_threshold || 0.3,
+                min_frequency: stepParams.min_frequency || 0.5
+              });
+              
               if (!filterResult || !filterResult.data) {
-                throw new Error("Data filtering failed to return valid data");
+                throw new Error("Data filtering returned invalid data");
               }
+              
               processedData = filterResult.data;
               results.push({ 
                 stepName: "Data Filtering", 
@@ -130,10 +205,16 @@ export const processingService = {
 
             case "normalization":
               console.log("Running Data Normalization...");
-              const normalizeResult = await normalizeData(processedData, step.parameters || {});
+              
+              const normalizeResult = await normalizeData(processedData, {
+                method: stepParams.method || "median",
+                reference_method: stepParams.reference_method || "internal_standard"
+              });
+              
               if (!normalizeResult || !normalizeResult.data) {
-                throw new Error("Data normalization failed to return valid data");
+                throw new Error("Data normalization returned invalid data");
               }
+              
               processedData = normalizeResult.data;
               results.push({ 
                 stepName: "Data Normalization", 
@@ -144,30 +225,39 @@ export const processingService = {
 
             case "identification":
               console.log("Running Compound Identification...");
+              
               const identifyResult = await identifyCompounds(processedData, {
-                ...step.parameters,
-                database: step.parameters?.database || "HMDB",
-                mass_tolerance: mzTolerance,
+                database: stepParams.database || "hmdb",
+                mass_tolerance: stepParams.mass_tolerance || mzTolerance,
                 ms2DbContent
               });
+              
               if (!identifyResult || !identifyResult.data) {
-                throw new Error("Compound identification failed to return valid data");
+                throw new Error("Compound identification returned invalid data");
               }
+              
               processedData = identifyResult.data;
               compoundsIdentified = identifyResult.compoundsIdentified || 0;
               results.push({ 
                 stepName: "Compound Identification", 
                 success: true, 
-                message: identifyResult.message || `Identified ${compoundsIdentified} compounds`
+                message: `Identified ${compoundsIdentified} compounds`
               });
               break;
 
             case "statistics":
               console.log("Running Statistical Analysis...");
-              const statsResult = await performStatistics(processedData, step.parameters || {});
+              
+              const statsResult = await performStatistics(processedData, {
+                test_type: stepParams.test_type || "t_test",
+                p_value_threshold: stepParams.p_value_threshold || 0.05,
+                fold_change_threshold: stepParams.fold_change_threshold || 1.5
+              });
+              
               if (!statsResult || !statsResult.data) {
-                throw new Error("Statistical analysis failed to return valid data");
+                throw new Error("Statistical analysis returned invalid data");
               }
+              
               processedData = statsResult.data;
               results.push({ 
                 stepName: "Statistical Analysis", 
@@ -185,17 +275,21 @@ export const processingService = {
               });
           }
           
-          // Small delay for UI feedback
-          await new Promise(resolve => setTimeout(resolve, 200));
+          // Brief delay for UI feedback
+          await new Promise(resolve => setTimeout(resolve, 100));
           
         } catch (stepError) {
           console.error(`Error in step ${step.name || step.type}:`, stepError);
+          const errorMessage = stepError instanceof Error ? stepError.message : "Unknown error occurred";
+          
           results.push({ 
             stepName: step.name || step.type, 
             success: false, 
-            message: stepError instanceof Error ? stepError.message : "Unknown error"
+            message: errorMessage
           });
-          // Continue with next step instead of failing completely
+          
+          // Continue with next step but mark as having failures
+          console.log(`Continuing workflow after error in ${step.name || step.type}`);
         }
       }
 
@@ -208,38 +302,45 @@ export const processingService = {
         processingTime
       };
 
-      // Store analysis with processed data in local storage
-      const analysis = {
-        workflowName: workflowName,
-        date: new Date().toISOString(),
-        summary: summary,
-        steps: workflowSteps,
-        results: results,
-        processedData: processedData
-      };
-      
-      let allAnalyses = [];
+      // Store analysis results
       try {
-        allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
-      } catch (error) {
-        console.warn('Failed to parse existing analyses:', error);
-        allAnalyses = [];
+        const analysis = {
+          workflowName,
+          date: new Date().toISOString(),
+          summary,
+          steps: workflowSteps,
+          results,
+          processedData
+        };
+        
+        let allAnalyses = [];
+        try {
+          const existing = localStorage.getItem('myAnalyses');
+          allAnalyses = existing ? JSON.parse(existing) : [];
+        } catch (parseError) {
+          console.warn('Failed to parse existing analyses:', parseError);
+          allAnalyses = [];
+        }
+        
+        allAnalyses.push(analysis);
+        localStorage.setItem('myAnalyses', JSON.stringify(allAnalyses));
+      } catch (storageError) {
+        console.error('Failed to store analysis results:', storageError);
       }
-      
-      allAnalyses.push(analysis);
-      localStorage.setItem('myAnalyses', JSON.stringify(allAnalyses));
 
       const hasFailures = results.some(r => !r.success);
       
       return { 
         success: !hasFailures, 
-        summary: summary,
-        results: results,
-        processedData: processedData
+        summary,
+        results,
+        processedData
       };
 
     } catch (error: any) {
-      console.error("Error during workflow execution:", error);
+      console.error("Critical error during workflow execution:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown workflow error";
+      
       return { 
         success: false, 
         summary: {
@@ -250,7 +351,7 @@ export const processingService = {
         results: [{ 
           stepName: "Workflow Error", 
           success: false, 
-          message: error.message || "Unknown workflow error"
+          message: errorMessage
         }]
       };
     }
@@ -260,12 +361,13 @@ export const processingService = {
     try {
       const allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
       if (!allAnalyses.length) return null;
+      
       const last = allAnalyses[allAnalyses.length - 1];
       
       return {
         success: true,
         processed: true,
-        summary: last.summary,
+        summary: last.summary || { peaksDetected: 0, compoundsIdentified: 0, processingTime: "0" },
         results: last.results || [],
         processedData: last.processedData || []
       };
