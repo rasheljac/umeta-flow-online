@@ -1,3 +1,4 @@
+
 import { ParsedMzData, Spectrum } from './mzParser';
 import { 
   calculateExactMassFromFormula, 
@@ -56,10 +57,10 @@ export const detectPeaks = async (
 ): Promise<any> => {
   try {
     // Lower default threshold for better real data detection
-    const { noise_threshold = 500, min_peak_width = 3, max_peak_width = 50 } = parameters;
+    const { noise_threshold = 100, min_peak_width = 3, max_peak_width = 50 } = parameters;
     
-    console.log(`Detecting peaks with threshold: ${noise_threshold}`);
-    console.log(`Input data structure:`, data.map(d => ({ 
+    console.log(`🔍 PEAK DETECTION: Starting with threshold: ${noise_threshold}`);
+    console.log(`📁 Input data structure:`, data.map(d => ({ 
       fileName: d.fileName, 
       spectra: d.spectra?.length || 0,
       totalPeaks: d.spectra?.reduce((sum, s) => sum + (s.peaks?.length || 0), 0) || 0
@@ -83,23 +84,28 @@ export const detectPeaks = async (
     
     for (const sample of data) {
       if (!sample || typeof sample !== 'object') {
-        console.warn(`Skipping invalid sample:`, sample);
+        console.warn(`⚠️ Skipping invalid sample:`, sample);
         continue;
       }
 
       if (!Array.isArray(sample.spectra) || sample.spectra.length === 0) {
-        console.warn(`Sample ${sample.fileName || 'unknown'} has no valid spectra`);
+        console.warn(`⚠️ Sample ${sample.fileName || 'unknown'} has no valid spectra`);
         continue;
       }
 
       let samplePeaks = 0;
+      let totalSpectra = 0;
+      let spectraWithPeaks = 0;
+      
       for (const spectrum of sample.spectra) {
+        totalSpectra++;
         if (!spectrum || !Array.isArray(spectrum.peaks) || spectrum.peaks.length === 0) {
           continue;
         }
 
         try {
-          // Use real peaks from the spectrum with lower threshold
+          // Enhanced peak validation and logging
+          const rawPeaks = spectrum.peaks.length;
           const validPeaks = spectrum.peaks.filter(peak => 
             peak && 
             typeof peak.mz === 'number' && 
@@ -113,6 +119,17 @@ export const detectPeaks = async (
             peak.intensity > 0
           );
           
+          if (validPeaks.length > 0) {
+            spectraWithPeaks++;
+            console.log(`📊 Spectrum ${spectrum.scanNumber || totalSpectra}: ${rawPeaks} raw peaks → ${validPeaks.length} valid peaks (threshold: ${noise_threshold})`);
+            
+            // Log some peak examples
+            if (validPeaks.length > 0) {
+              const samplePeaks = validPeaks.slice(0, 3);
+              console.log(`   Sample peaks:`, samplePeaks.map(p => `m/z ${p.mz.toFixed(4)} (${p.intensity.toFixed(0)})`).join(', '));
+            }
+          }
+          
           const processedPeaks = validPeaks.map(peak => ({
             mz: peak.mz,
             intensity: peak.intensity,
@@ -124,11 +141,11 @@ export const detectPeaks = async (
           allPeaks.push(...processedPeaks);
           samplePeaks += processedPeaks.length;
         } catch (spectrumError) {
-          console.warn(`Error processing spectrum in ${sample.fileName}:`, spectrumError);
+          console.warn(`❌ Error processing spectrum in ${sample.fileName}:`, spectrumError);
         }
       }
       
-      console.log(`Sample ${sample.fileName}: detected ${samplePeaks} peaks above threshold`);
+      console.log(`✅ Sample ${sample.fileName}: ${samplePeaks} peaks from ${spectraWithPeaks}/${totalSpectra} spectra`);
       processedSamples++;
     }
     
@@ -153,7 +170,7 @@ export const detectPeaks = async (
       };
     });
     
-    console.log(`Peak detection complete: ${allPeaks.length} total peaks above threshold across ${processedSamples} samples`);
+    console.log(`🎉 PEAK DETECTION COMPLETE: ${allPeaks.length} total peaks above threshold across ${processedSamples} samples`);
     
     return {
       data: resultData,
@@ -162,7 +179,7 @@ export const detectPeaks = async (
     };
     
   } catch (error) {
-    console.error('Peak detection error:', error);
+    console.error('❌ Peak detection error:', error);
     throw new Error(`Peak detection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
@@ -415,32 +432,40 @@ export const identifyCompounds = async (
   parameters: any
 ): Promise<any> => {
   // Enhanced tolerance - support both ppm and Da
-  const { database = 'HMDB', mass_tolerance = 10, tolerance_unit = 'ppm' } = parameters;
+  const { database = 'HMDB', mass_tolerance = 5, tolerance_unit = 'ppm' } = parameters;
   
-  console.log(`Starting compound identification using ${database} database with tolerance ${mass_tolerance} ${tolerance_unit}`);
+  console.log(`🔬 COMPOUND IDENTIFICATION: Starting using ${database} database with tolerance ${mass_tolerance} ${tolerance_unit}`);
   
   await new Promise(resolve => setTimeout(resolve, 300));
   
   const identifiedCompounds: IdentifiedCompound[] = [];
   
-  // Enhanced compound loading from localStorage with fallback
+  // Enhanced compound loading from localStorage with comprehensive debugging
   let uploadedCompounds: any[] = [];
   try {
     const storedCompoundList = localStorage.getItem('compoundListData');
+    console.log(`📋 Checking localStorage for compound list...`);
+    
     if (storedCompoundList) {
       const parsed = JSON.parse(storedCompoundList);
       uploadedCompounds = Array.isArray(parsed) ? parsed : [];
-      console.log(`Loaded uploaded compound list with ${uploadedCompounds.length} compounds`);
-      console.log('Sample uploaded compounds:', uploadedCompounds.slice(0, 3));
+      console.log(`✅ Loaded uploaded compound list with ${uploadedCompounds.length} compounds`);
+      console.log(`📝 Sample uploaded compounds:`, uploadedCompounds.slice(0, 3).map(c => ({
+        name: c.name || c.compound || c.Compound,
+        formula: c.formula || c.Formula,
+        mass: c.mass || c.exactMass
+      })));
+    } else {
+      console.log(`⚠️ No compound list found in localStorage`);
     }
   } catch (error) {
-    console.warn('Failed to load uploaded compound list:', error);
+    console.warn('❌ Failed to load uploaded compound list:', error);
   }
   
   // Use uploaded compounds if available, otherwise fall back to built-in database
   const compoundsToSearch = uploadedCompounds.length > 0 ? uploadedCompounds : COMPOUND_DATABASE;
   
-  console.log(`Searching against ${compoundsToSearch.length} compounds from ${uploadedCompounds.length > 0 ? 'uploaded CSV' : 'built-in database'}`);
+  console.log(`🎯 Searching against ${compoundsToSearch.length} compounds from ${uploadedCompounds.length > 0 ? 'uploaded CSV' : 'built-in database'}`);
   
   // Pre-calculate theoretical m/z values for all compounds with enhanced calculation
   const compoundMZDatabase = compoundsToSearch.map(compound => {
@@ -449,26 +474,39 @@ export const identifyCompounds = async (
     if (exactMass && exactMass > 0) {
       const theoreticalMZs = calculateAllTheoreticalMZ(exactMass);
       
-      return {
+      const result = {
         ...compound,
         exactMass,
         theoreticalMZs,
         name: compound.name || compound.compound || compound.Compound || 'Unknown'
       };
+      
+      console.log(`🧮 Compound ${result.name}: mass ${exactMass.toFixed(4)}, ${theoreticalMZs.length} theoretical m/z values`);
+      return result;
     }
     return null;
   }).filter(compound => compound !== null && compound.exactMass > 0);
   
-  console.log(`Pre-calculated m/z values for ${compoundMZDatabase.length} valid compounds`);
+  console.log(`✅ Pre-calculated m/z values for ${compoundMZDatabase.length} valid compounds`);
   
   let totalPeaksProcessed = 0;
   let matchesFound = 0;
+  let samplesProcessed = 0;
   
   data.forEach((sample, sampleIndex) => {
     const peaks = sample.normalizedPeaks || sample.filteredPeaks || sample.alignedPeaks || sample.detectedPeaks || [];
     
-    console.log(`Processing sample ${sample.fileName || sampleIndex}: ${peaks.length} peaks`);
+    console.log(`🔍 Processing sample ${sample.fileName || sampleIndex}: ${peaks.length} peaks`);
     totalPeaksProcessed += peaks.length;
+    samplesProcessed++;
+    
+    // Log some sample peaks for debugging
+    if (peaks.length > 0) {
+      const samplePeaks = peaks.slice(0, 5);
+      console.log(`   Sample peaks (first 5):`, samplePeaks.map((p: any) => `m/z ${p.mz?.toFixed(4)} (${p.intensity?.toFixed(0)})`).join(', '));
+    }
+    
+    let sampleMatches = 0;
     
     peaks.forEach((peak: Peak, peakIndex: number) => {
       if (!peak || typeof peak.mz !== 'number' || peak.mz <= 0) {
@@ -494,9 +532,10 @@ export const identifyCompounds = async (
           const compoundName = compound.name;
           const matchScore = Math.max(0, 1 - (match.ppmError / tolerancePPM));
           
-          // Only accept matches with reasonable scores
-          if (matchScore > 0.1) { // At least 10% match quality
-            console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name} (theoretical: ${match.mz.toFixed(4)}, error: ${match.ppmError.toFixed(2)} ppm, score: ${matchScore.toFixed(3)})`);
+          // More lenient matching threshold for debugging
+          if (matchScore > 0.05) { // At least 5% match quality
+            console.log(`🎯 MATCH FOUND: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name}`);
+            console.log(`   Theoretical: ${match.mz.toFixed(4)}, Error: ${match.ppmError.toFixed(2)} ppm, Score: ${matchScore.toFixed(3)}`);
             
             identifiedCompounds.push({
               id: `${compoundName}_${match.mode.name}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
@@ -509,14 +548,32 @@ export const identifyCompounds = async (
             });
             
             matchesFound++;
+            sampleMatches++;
           }
         });
       });
     });
+    
+    console.log(`   Sample matches: ${sampleMatches}`);
   });
   
-  console.log(`Identification complete: ${matchesFound} matches found from ${totalPeaksProcessed} peaks`);
-  console.log(`Sample identifications:`, identifiedCompounds.slice(0, 5));
+  console.log(`🎉 IDENTIFICATION COMPLETE:`);
+  console.log(`   📊 ${matchesFound} matches found from ${totalPeaksProcessed} peaks across ${samplesProcessed} samples`);
+  console.log(`   🏛️ Database: ${uploadedCompounds.length > 0 ? 'Uploaded CSV' : database} (${compoundsToSearch.length} compounds)`);
+  console.log(`   🎯 Tolerance: ${mass_tolerance} ${tolerance_unit}`);
+  
+  if (identifiedCompounds.length > 0) {
+    console.log(`   📝 Sample identifications:`, identifiedCompounds.slice(0, 5).map(c => ({
+      name: c.name,
+      mz: c.peaks[0].mz.toFixed(4),
+      error: c.peaks[0].ppmError?.toFixed(2) + ' ppm'
+    })));
+  } else {
+    console.log(`❌ NO MATCHES FOUND. Debugging info:`);
+    console.log(`   Peak count by sample:`, data.map(s => ({ name: s.fileName, peaks: (s.detectedPeaks || []).length })));
+    console.log(`   Compound database size: ${compoundMZDatabase.length}`);
+    console.log(`   Tolerance settings: ${mass_tolerance} ${tolerance_unit}`);
+  }
   
   const sourceInfo = uploadedCompounds.length > 0 
     ? `uploaded CSV (${uploadedCompounds.length} compounds)` 
