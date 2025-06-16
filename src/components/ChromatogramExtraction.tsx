@@ -34,6 +34,15 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
       return;
     }
 
+    if (!uploadedData || uploadedData.length === 0) {
+      toast({
+        title: "No data available",
+        description: "Please upload data files first",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsExtracting(true);
     
     try {
@@ -42,53 +51,130 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
       const rtStart = extractionParams.rtStart ? parseFloat(extractionParams.rtStart) : undefined;
       const rtEnd = extractionParams.rtEnd ? parseFloat(extractionParams.rtEnd) : undefined;
 
+      console.log(`Extracting chromatogram for m/z ${mzTarget} ± ${tolerance}`);
+      console.log('Input data structure:', uploadedData.map(d => ({ 
+        fileName: d.fileName, 
+        spectra: d.spectra?.length || 0,
+        hasSpectra: !!d.spectra 
+      })));
+
       // Extract chromatogram from uploaded data
       const chromatogramData: any[] = [];
 
       uploadedData.forEach((sample, sampleIndex) => {
-        if (sample.spectra) {
-          sample.spectra.forEach((spectrum: any) => {
-            // Check retention time filter
-            if (rtStart !== undefined && spectrum.retentionTime < rtStart) return;
-            if (rtEnd !== undefined && spectrum.retentionTime > rtEnd) return;
+        console.log(`Processing sample ${sampleIndex}: ${sample.fileName || 'Unknown'}`);
+        
+        // Handle different data structures
+        const spectraArray = sample.spectra || sample.data || [];
+        
+        if (!Array.isArray(spectraArray)) {
+          console.warn(`Sample ${sample.fileName} has invalid spectra format:`, typeof spectraArray);
+          return;
+        }
+        
+        if (spectraArray.length === 0) {
+          console.warn(`Sample ${sample.fileName} has no spectra`);
+          return;
+        }
 
-            // Find peaks within m/z tolerance
-            let totalIntensity = 0;
-            if (spectrum.peaks) {
-              spectrum.peaks.forEach((peak: any) => {
-                const mzDiff = Math.abs(peak.mz - mzTarget);
-                if (mzDiff <= tolerance) {
-                  totalIntensity += peak.intensity;
-                }
-              });
+        console.log(`Sample ${sample.fileName}: processing ${spectraArray.length} spectra`);
+
+        spectraArray.forEach((spectrum: any, spectrumIndex: number) => {
+          // Validate spectrum structure
+          if (!spectrum || typeof spectrum !== 'object') {
+            console.warn(`Invalid spectrum at index ${spectrumIndex} in ${sample.fileName}`);
+            return;
+          }
+
+          // Handle different retention time field names
+          const retentionTime = spectrum.retentionTime || spectrum.retention_time || spectrum.rt || spectrum.time || 0;
+          
+          if (typeof retentionTime !== 'number') {
+            console.warn(`Invalid retention time in spectrum ${spectrumIndex}: ${retentionTime}`);
+            return;
+          }
+
+          // Check retention time filter
+          if (rtStart !== undefined && retentionTime < rtStart) return;
+          if (rtEnd !== undefined && retentionTime > rtEnd) return;
+
+          // Handle different peaks field names and structures
+          const peaks = spectrum.peaks || spectrum.data || spectrum.mzIntensityPairs || [];
+          
+          if (!Array.isArray(peaks)) {
+            console.warn(`Invalid peaks format in spectrum ${spectrumIndex}: ${typeof peaks}`);
+            return;
+          }
+
+          // Find peaks within m/z tolerance
+          let totalIntensity = 0;
+          let peaksInRange = 0;
+          
+          peaks.forEach((peak: any) => {
+            // Handle different peak structures
+            let peakMz: number;
+            let peakIntensity: number;
+            
+            if (typeof peak === 'object' && peak !== null) {
+              // Object format: {mz: number, intensity: number}
+              peakMz = peak.mz || peak.mass || peak.m || 0;
+              peakIntensity = peak.intensity || peak.i || peak.abundance || 0;
+            } else if (Array.isArray(peak) && peak.length >= 2) {
+              // Array format: [mz, intensity]
+              peakMz = peak[0] || 0;
+              peakIntensity = peak[1] || 0;
+            } else {
+              return; // Skip invalid peak format
             }
-
-            if (totalIntensity > 0) {
-              chromatogramData.push({
-                retentionTime: spectrum.retentionTime,
-                intensity: totalIntensity,
-                sample: sample.fileName || `Sample ${sampleIndex + 1}`,
-                sampleIndex
-              });
+            
+            if (typeof peakMz !== 'number' || typeof peakIntensity !== 'number') {
+              return; // Skip invalid peak data
+            }
+            
+            const mzDiff = Math.abs(peakMz - mzTarget);
+            if (mzDiff <= tolerance) {
+              totalIntensity += peakIntensity;
+              peaksInRange++;
             }
           });
-        }
+
+          if (totalIntensity > 0) {
+            chromatogramData.push({
+              retentionTime: retentionTime,
+              intensity: totalIntensity,
+              sample: sample.fileName || `Sample ${sampleIndex + 1}`,
+              sampleIndex,
+              peaksInRange
+            });
+          }
+        });
       });
 
       // Sort by retention time
       chromatogramData.sort((a, b) => a.retentionTime - b.retentionTime);
       
+      console.log(`Extraction complete: ${chromatogramData.length} data points found`);
+      console.log('Sample data points:', chromatogramData.slice(0, 5));
+      
       setExtractedData(chromatogramData);
       
-      toast({
-        title: "Extraction complete",
-        description: `Found ${chromatogramData.length} data points for m/z ${mzTarget}`
-      });
+      if (chromatogramData.length === 0) {
+        toast({
+          title: "No data found",
+          description: `No peaks found for m/z ${mzTarget} within tolerance ${tolerance} Da. Try increasing the tolerance or checking your m/z value.`,
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Extraction complete",
+          description: `Found ${chromatogramData.length} data points for m/z ${mzTarget} (total intensity from ${chromatogramData.reduce((sum, d) => sum + d.peaksInRange, 0)} peaks)`
+        });
+      }
     } catch (error) {
       console.error('Chromatogram extraction failed:', error);
       toast({
         title: "Extraction failed",
-        description: "Failed to extract chromatogram. Please check your parameters.",
+        description: `Failed to extract chromatogram: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive"
       });
     } finally {
@@ -107,9 +193,9 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
     }
 
     try {
-      let csvContent = 'Retention Time (min),Intensity,Sample\n';
+      let csvContent = 'Retention Time (min),Intensity,Sample,Peaks in Range\n';
       extractedData.forEach(point => {
-        csvContent += `${point.retentionTime},${point.intensity},${point.sample}\n`;
+        csvContent += `${point.retentionTime},${point.intensity},${point.sample},${point.peaksInRange}\n`;
       });
 
       const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -137,6 +223,8 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
   };
 
   const uniqueSamples = [...new Set(extractedData.map(d => d.sample))];
+  const hasData = uploadedData && uploadedData.length > 0;
+  const dataInfo = hasData ? `${uploadedData.length} samples loaded` : 'No data loaded';
 
   return (
     <div className="space-y-6">
@@ -146,6 +234,9 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
             <Search className="w-5 h-5" />
             <span>Extract Ion Chromatogram</span>
           </CardTitle>
+          <div className="text-sm text-slate-600">
+            {dataInfo} | Status: {hasData ? 'Ready for extraction' : 'Upload data files first'}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -158,6 +249,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
                 placeholder="e.g., 100.0758"
                 value={extractionParams.mzValue}
                 onChange={(e) => setExtractionParams(prev => ({ ...prev, mzValue: e.target.value }))}
+                disabled={!hasData}
               />
             </div>
             <div>
@@ -169,6 +261,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
                 placeholder="0.01"
                 value={extractionParams.mzTolerance}
                 onChange={(e) => setExtractionParams(prev => ({ ...prev, mzTolerance: e.target.value }))}
+                disabled={!hasData}
               />
             </div>
             <div>
@@ -180,6 +273,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
                 placeholder="Optional"
                 value={extractionParams.rtStart}
                 onChange={(e) => setExtractionParams(prev => ({ ...prev, rtStart: e.target.value }))}
+                disabled={!hasData}
               />
             </div>
             <div>
@@ -191,6 +285,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
                 placeholder="Optional"
                 value={extractionParams.rtEnd}
                 onChange={(e) => setExtractionParams(prev => ({ ...prev, rtEnd: e.target.value }))}
+                disabled={!hasData}
               />
             </div>
           </div>
@@ -198,7 +293,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
           <div className="flex space-x-2">
             <Button 
               onClick={handleExtractChromatogram}
-              disabled={isExtracting || !extractionParams.mzValue}
+              disabled={isExtracting || !extractionParams.mzValue || !hasData}
             >
               {isExtracting ? 'Extracting...' : 'Extract Chromatogram'}
             </Button>
@@ -217,6 +312,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
               {uniqueSamples.map(sample => (
                 <Badge key={sample} variant="secondary">{sample}</Badge>
               ))}
+              <Badge variant="outline">{extractedData.length} data points</Badge>
             </div>
           )}
         </CardContent>
@@ -226,6 +322,10 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
         <Card>
           <CardHeader>
             <CardTitle>Extracted Ion Chromatogram</CardTitle>
+            <div className="text-sm text-slate-600">
+              m/z {extractionParams.mzValue} ± {extractionParams.mzTolerance} Da | 
+              {extractedData.length} data points across {uniqueSamples.length} samples
+            </div>
           </CardHeader>
           <CardContent>
             <div className="h-80">
@@ -235,20 +335,26 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
                   <XAxis 
                     dataKey="retentionTime" 
                     label={{ value: 'Retention Time (min)', position: 'insideBottom', offset: -5 }}
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
                   />
                   <YAxis 
                     label={{ value: 'Intensity', angle: -90, position: 'insideLeft' }}
                   />
                   <Tooltip 
-                    formatter={(value, name) => [value, 'Intensity']}
-                    labelFormatter={(label) => `RT: ${label} min`}
+                    formatter={(value, name) => [
+                      typeof value === 'number' ? value.toLocaleString() : value, 
+                      'Intensity'
+                    ]}
+                    labelFormatter={(label) => `RT: ${typeof label === 'number' ? label.toFixed(2) : label} min`}
                   />
                   <Line 
                     type="monotone" 
                     dataKey="intensity" 
-                    stroke="#8884d8" 
+                    stroke="#3B82F6" 
                     strokeWidth={2}
                     dot={false}
+                    connectNulls={false}
                   />
                 </LineChart>
               </ResponsiveContainer>

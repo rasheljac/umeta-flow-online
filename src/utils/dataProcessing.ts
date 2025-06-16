@@ -50,6 +50,7 @@ export const detectPeaks = async (
     const { noise_threshold = 1000, min_peak_width = 3, max_peak_width = 50 } = parameters;
     
     console.log(`Detecting peaks with threshold: ${noise_threshold}`);
+    console.log(`Input data structure:`, data.map(d => ({ fileName: d.fileName, spectra: d.spectra?.length || 0 })));
     
     if (!Array.isArray(data) || data.length === 0) {
       throw new Error("Invalid data format: expected array of samples");
@@ -116,6 +117,8 @@ export const detectPeaks = async (
         detectedPeaks: samplePeaks
       };
     });
+    
+    console.log(`Peak detection complete: ${allPeaks.length} total peaks across ${processedSamples} samples`);
     
     return {
       data: resultData,
@@ -406,7 +409,7 @@ export const identifyCompounds = async (
 ): Promise<any> => {
   const { database = 'HMDB', mass_tolerance = 0.01, ms2DbContent = null } = parameters;
   
-  console.log(`Identifying compounds using ${database} database with tolerance ${mass_tolerance}`);
+  console.log(`Starting compound identification using ${database} database with tolerance ${mass_tolerance} Da`);
   
   await new Promise(resolve => setTimeout(resolve, 300));
   
@@ -419,6 +422,7 @@ export const identifyCompounds = async (
     if (storedCompoundList) {
       uploadedCompounds = JSON.parse(storedCompoundList);
       console.log(`Using uploaded compound list with ${uploadedCompounds.length} compounds`);
+      console.log('Sample uploaded compounds:', uploadedCompounds.slice(0, 3));
     }
   } catch (error) {
     console.warn('Failed to load uploaded compound list:', error);
@@ -428,17 +432,35 @@ export const identifyCompounds = async (
   const compoundsToSearch = uploadedCompounds.length > 0 ? uploadedCompounds : COMPOUND_DATABASE;
   
   console.log(`Searching against ${compoundsToSearch.length} compounds`);
+  console.log('Sample compound structures:', compoundsToSearch.slice(0, 2));
   
-  data.forEach(sample => {
+  let totalPeaksProcessed = 0;
+  let matchesFound = 0;
+  
+  data.forEach((sample, sampleIndex) => {
     const peaks = sample.normalizedPeaks || sample.filteredPeaks || sample.alignedPeaks || sample.detectedPeaks || [];
     
-    peaks.forEach((peak: Peak) => {
+    console.log(`Processing sample ${sample.fileName || sampleIndex}: ${peaks.length} peaks`);
+    totalPeaksProcessed += peaks.length;
+    
+    peaks.forEach((peak: Peak, peakIndex: number) => {
       // Find matching compounds within mass tolerance
       const matches = compoundsToSearch.filter(compound => {
         // Handle both uploaded CSV format and built-in database format
         const compoundMass = compound.mass || calculateMassFromFormula(compound.formula);
+        
+        if (!compoundMass || compoundMass === 0) {
+          return false;
+        }
+        
         const massDiff = Math.abs(peak.mz - compoundMass);
-        return massDiff <= mass_tolerance;
+        const withinTolerance = massDiff <= mass_tolerance;
+        
+        if (withinTolerance) {
+          console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compound.compound || compound.name} (${compoundMass.toFixed(4)} Da, diff: ${massDiff.toFixed(4)} Da)`);
+        }
+        
+        return withinTolerance;
       });
       
       matches.forEach(compound => {
@@ -450,7 +472,7 @@ export const identifyCompounds = async (
         const compoundName = compound.compound || compound.name;
         
         identifiedCompounds.push({
-          id: `${compoundName}_${peak.mz.toFixed(4)}_${sample.fileName}`,
+          id: `${compoundName}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
           name: compoundName,
           formula: compound.formula,
           mass: compoundMass,
@@ -458,9 +480,14 @@ export const identifyCompounds = async (
           database: uploadedCompounds.length > 0 ? 'Uploaded CSV' : database,
           peaks: [peak]
         });
+        
+        matchesFound++;
       });
     });
   });
+  
+  console.log(`Identification complete: ${matchesFound} matches found from ${totalPeaksProcessed} peaks`);
+  console.log(`Sample identifications:`, identifiedCompounds.slice(0, 5));
   
   const sourceInfo = uploadedCompounds.length > 0 
     ? `uploaded CSV (${uploadedCompounds.length} compounds)` 
@@ -469,36 +496,84 @@ export const identifyCompounds = async (
   return {
     data: data.map((sample, index) => ({
       ...sample,
-      identifiedCompounds: identifiedCompounds.filter(c => c.id.endsWith(sample.fileName))
+      identifiedCompounds: identifiedCompounds.filter(c => c.id.includes(sample.fileName || `_${index}_`))
     })),
     compoundsIdentified: identifiedCompounds.length,
-    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} within ${mass_tolerance} Da tolerance`
+    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} within ${mass_tolerance} Da tolerance (processed ${totalPeaksProcessed} peaks)`
   };
 };
 
-// Helper function to calculate molecular mass from formula (basic implementation)
+// Helper function to calculate molecular mass from formula (enhanced implementation)
 function calculateMassFromFormula(formula: string): number {
-  if (!formula) return 0;
+  if (!formula || typeof formula !== 'string') return 0;
   
-  // Basic atomic masses
+  // Remove spaces and normalize formula
+  const cleanFormula = formula.replace(/\s+/g, '');
+  
+  // Enhanced atomic masses with more elements
   const atomicMasses: { [key: string]: number } = {
     'C': 12.011, 'H': 1.008, 'O': 15.999, 'N': 14.007, 
     'S': 32.066, 'P': 30.974, 'Cl': 35.453, 'Br': 79.904,
     'F': 18.998, 'I': 126.904, 'Na': 22.990, 'K': 39.098,
-    'Ca': 40.078, 'Mg': 24.305, 'Fe': 55.845, 'Zn': 65.380
+    'Ca': 40.078, 'Mg': 24.305, 'Fe': 55.845, 'Zn': 65.380,
+    'Cu': 63.546, 'Mn': 54.938, 'Mo': 95.960, 'Se': 78.960,
+    'Si': 28.085, 'B': 10.811, 'Al': 26.982
   };
   
   let mass = 0;
-  const regex = /([A-Z][a-z]?)(\d*)/g;
-  let match;
   
-  while ((match = regex.exec(formula)) !== null) {
-    const element = match[1];
-    const count = parseInt(match[2]) || 1;
-    mass += (atomicMasses[element] || 0) * count;
+  // Handle simple formulas without brackets first
+  if (!cleanFormula.includes('(')) {
+    const regex = /([A-Z][a-z]?)(\d*)/g;
+    let match;
+    
+    while ((match = regex.exec(cleanFormula)) !== null) {
+      const element = match[1];
+      const count = parseInt(match[2]) || 1;
+      const atomicMass = atomicMasses[element];
+      
+      if (atomicMass) {
+        mass += atomicMass * count;
+      } else {
+        console.warn(`Unknown element: ${element} in formula: ${formula}`);
+      }
+    }
+  } else {
+    // Handle formulas with brackets (basic implementation)
+    let expandedFormula = cleanFormula;
+    
+    // Simple bracket expansion (handles one level of nesting)
+    const bracketRegex = /\(([^)]+)\)(\d*)/g;
+    expandedFormula = expandedFormula.replace(bracketRegex, (match, content, multiplier) => {
+      const mult = parseInt(multiplier) || 1;
+      let expanded = '';
+      const contentRegex = /([A-Z][a-z]?)(\d*)/g;
+      let contentMatch;
+      
+      while ((contentMatch = contentRegex.exec(content)) !== null) {
+        const element = contentMatch[1];
+        const count = (parseInt(contentMatch[2]) || 1) * mult;
+        expanded += element + (count > 1 ? count : '');
+      }
+      return expanded;
+    });
+    
+    // Now calculate mass from expanded formula
+    const regex = /([A-Z][a-z]?)(\d*)/g;
+    let match;
+    
+    while ((match = regex.exec(expandedFormula)) !== null) {
+      const element = match[1];
+      const count = parseInt(match[2]) || 1;
+      const atomicMass = atomicMasses[element];
+      
+      if (atomicMass) {
+        mass += atomicMass * count;
+      }
+    }
   }
   
-  return mass;
+  return Math.round(mass * 10000) / 10000; // Round to 4 decimal places
 }
 
 export const performStatistics = async (

@@ -1,4 +1,3 @@
-
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
@@ -34,14 +33,12 @@ const Navigation = () => {
           <div className="flex items-center space-x-8">
             <Link to="/" className="flex items-center space-x-3">
               {/* Logo branding with proper aspect ratio */}
-              <div className="h-10">
-                <AspectRatio ratio={1} className="h-full">
-                  <img
-                    src="/lovable-uploads/9521b0f4-3d7b-4906-a9fc-de87f5126a5a.png"
-                    alt="Kapelczak Logo"
-                    className="h-full w-full object-contain"
-                  />
-                </AspectRatio>
+              <div className="h-10 w-10">
+                <img
+                  src="/lovable-uploads/9521b0f4-3d7b-4906-a9fc-de87f5126a5a.png"
+                  alt="Kapelczak Logo"
+                  className="h-full w-full object-contain"
+                />
               </div>
               <span className="text-xl font-bold text-slate-900" style={{ letterSpacing: "0.01em" }}>Kapelczak</span>
             </Link>
