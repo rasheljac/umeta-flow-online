@@ -1,6 +1,7 @@
 
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { useAuth } from './AuthProvider';
 import { useProfile } from '@/hooks/useProfile';
 import { Microscope, Upload, BarChart3, LogOut, User, History } from 'lucide-react';
@@ -32,12 +33,16 @@ const Navigation = () => {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-8">
             <Link to="/" className="flex items-center space-x-3">
-              {/* Logo branding */}
-              <img
-                src="/lovable-uploads/9521b0f4-3d7b-4906-a9fc-de87f5126a5a.png"
-                alt="Kapelczak Logo"
-                className="h-7 w-7"
-              />
+              {/* Logo branding with proper aspect ratio */}
+              <div className="h-7">
+                <AspectRatio ratio={1} className="h-full">
+                  <img
+                    src="/lovable-uploads/9521b0f4-3d7b-4906-a9fc-de87f5126a5a.png"
+                    alt="Kapelczak Logo"
+                    className="h-full w-full object-contain"
+                  />
+                </AspectRatio>
+              </div>
               <span className="text-xl font-bold text-slate-900" style={{ letterSpacing: "0.01em" }}>Kapelczak</span>
             </Link>
             
