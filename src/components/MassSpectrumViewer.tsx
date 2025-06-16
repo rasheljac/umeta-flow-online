@@ -1,11 +1,11 @@
 
 import { useState } from "react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Spectrum, ParsedMzData } from "@/utils/mzParser";
 import { BarChart3, Zap } from "lucide-react";
+import StemPlot from "./StemPlot";
 
 interface MassSpectrumViewerProps {
   data: ParsedMzData[];
@@ -35,40 +35,20 @@ const MassSpectrumViewer = ({ data }: MassSpectrumViewerProps) => {
     );
   }
 
-  // Prepare data for mass spectrum visualization - create stem plot data
-  const spectrumData = currentSpectrum.peaks
-    .filter(peak => peak.intensity > 0)
+  // Prepare peaks for stem plot - filter and sort
+  const plotPeaks = currentSpectrum.peaks
+    .filter(peak => peak.intensity > 0 && peak.mz > 0)
     .sort((a, b) => a.mz - b.mz)
-    .flatMap(peak => [
-      { mz: peak.mz, intensity: 0, isBaseline: true },
-      { mz: peak.mz, intensity: peak.intensity, isBaseline: false },
-      { mz: peak.mz, intensity: 0, isBaseline: true }
-    ]);
+    .map(peak => ({
+      mz: peak.mz,
+      intensity: peak.intensity
+    }));
 
-  // Custom dot component for stem plot
-  const CustomDot = (props: any) => {
-    const { cx, cy, payload } = props;
-    if (payload.isBaseline) {
-      return null; // Don't render dots at baseline
-    }
-    return <circle cx={cx} cy={cy} r={2} fill="#3B82F6" />;
-  };
-
-  // Custom tooltip for better peak information
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      if (data.isBaseline) return null;
-      
-      return (
-        <div className="bg-white p-3 border rounded shadow-lg">
-          <p className="font-medium">{`m/z: ${Number(label).toFixed(4)}`}</p>
-          <p className="text-blue-600">{`Intensity: ${data.intensity.toLocaleString()}`}</p>
-        </div>
-      );
-    }
-    return null;
-  };
+  console.log(`📊 Rendering spectrum with ${plotPeaks.length} peaks for ${currentFile.fileName}`);
+  if (plotPeaks.length > 0) {
+    console.log(`📈 m/z range: ${plotPeaks[0].mz.toFixed(4)} - ${plotPeaks[plotPeaks.length - 1].mz.toFixed(4)}`);
+    console.log(`📈 Intensity range: ${Math.min(...plotPeaks.map(p => p.intensity)).toFixed(0)} - ${Math.max(...plotPeaks.map(p => p.intensity)).toFixed(0)}`);
+  }
 
   return (
     <div className="space-y-6">
@@ -108,7 +88,7 @@ const MassSpectrumViewer = ({ data }: MassSpectrumViewerProps) => {
             MS{currentSpectrum.msLevel}
           </Badge>
           <Badge variant="outline">
-            {currentSpectrum.peaks.length} peaks
+            {plotPeaks.length} peaks
           </Badge>
         </div>
       </div>
@@ -126,33 +106,13 @@ const MassSpectrumViewer = ({ data }: MassSpectrumViewerProps) => {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={spectrumData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="mz" 
-                  type="number"
-                  scale="linear"
-                  domain={['dataMin', 'dataMax']}
-                  label={{ value: 'm/z', position: 'insideBottom', offset: -5 }}
-                />
-                <YAxis 
-                  domain={[0, 'dataMax']}
-                  label={{ value: 'Intensity', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Line 
-                  dataKey="intensity" 
-                  stroke="#3B82F6"
-                  strokeWidth={1}
-                  dot={<CustomDot />}
-                  connectNulls={false}
-                />
-                {/* Add baseline reference */}
-                <ReferenceLine y={0} stroke="#666" strokeDasharray="2 2" />
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="w-full">
+            <StemPlot 
+              peaks={plotPeaks}
+              width={800}
+              height={400}
+              className="mx-auto"
+            />
           </div>
         </CardContent>
       </Card>

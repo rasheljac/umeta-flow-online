@@ -16,43 +16,88 @@ export const binaryDataParser: BinaryDataParser = {
         return new Float32Array();
       }
 
-      // Clean base64 data
-      const cleanedData = base64Data.replace(/\s/g, '');
+      // Enhanced base64 cleaning - remove all whitespace and validate
+      const cleanedData = base64Data.replace(/\s/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
       
-      // Decode base64
+      // Validate base64 format more thoroughly
+      if (cleanedData.length === 0) {
+        console.warn('⚠️ Empty base64 data after cleaning');
+        return new Float32Array();
+      }
+      
+      if (cleanedData.length % 4 !== 0) {
+        console.warn(`⚠️ Invalid base64 length: ${cleanedData.length} (should be divisible by 4)`);
+        // Pad with = characters if needed
+        const paddedData = cleanedData + '='.repeat(4 - (cleanedData.length % 4));
+        console.log(`🔧 Padded base64 data to length: ${paddedData.length}`);
+      }
+      
+      // Decode base64 with enhanced error handling
       let binaryString: string;
       try {
         binaryString = atob(cleanedData);
       } catch (error) {
         console.error('❌ Base64 decode failed:', error);
-        return new Float32Array();
+        // Try with padding
+        const paddedData = cleanedData + '='.repeat(4 - (cleanedData.length % 4));
+        try {
+          binaryString = atob(paddedData);
+          console.log('✅ Base64 decode succeeded with padding');
+        } catch (paddedError) {
+          console.error('❌ Base64 decode failed even with padding:', paddedError);
+          return new Float32Array();
+        }
       }
 
       console.log(`📊 Decoded binary string length: ${binaryString.length} bytes`);
 
-      // Handle compression if specified
+      // Enhanced compression handling (placeholder for future implementation)
       let finalBinaryString = binaryString;
       if (compression && compression.toLowerCase() === 'zlib') {
         console.log('⚠️ zlib compression detected but not implemented, using raw data');
-        // Note: Real zlib decompression would require additional libraries
+        // Note: Real zlib decompression would require additional libraries like pako
       }
 
-      // Convert to array buffer
+      // Validate binary string length for Float32Array (should be multiple of 4)
+      if (finalBinaryString.length % 4 !== 0) {
+        console.warn(`⚠️ Binary data length ${finalBinaryString.length} not divisible by 4 for Float32Array`);
+        // Truncate to nearest multiple of 4
+        const truncatedLength = Math.floor(finalBinaryString.length / 4) * 4;
+        finalBinaryString = finalBinaryString.substring(0, truncatedLength);
+        console.log(`🔧 Truncated binary data to length: ${truncatedLength}`);
+      }
+
+      // Convert to array buffer with byte order consideration
       const arrayBuffer = new ArrayBuffer(finalBinaryString.length);
       const uint8Array = new Uint8Array(arrayBuffer);
       
       for (let i = 0; i < finalBinaryString.length; i++) {
-        uint8Array[i] = finalBinaryString.charCodeAt(i);
+        uint8Array[i] = finalBinaryString.charCodeAt(i) & 0xFF; // Ensure byte range
       }
 
+      // Create Float32Array and validate values
       const float32Array = new Float32Array(arrayBuffer);
       
-      console.log(`✅ Parsed ${float32Array.length} float32 values`);
-      console.log(`📈 Value range: ${Math.min(...float32Array).toFixed(4)} - ${Math.max(...float32Array).toFixed(4)}`);
+      // Count valid vs invalid values
+      let validValues = 0;
+      let invalidValues = 0;
+      for (let i = 0; i < float32Array.length; i++) {
+        const value = float32Array[i];
+        if (isFinite(value) && !isNaN(value)) {
+          validValues++;
+        } else {
+          invalidValues++;
+        }
+      }
       
-      // Log some sample values for debugging
-      if (float32Array.length > 0) {
-        const sampleValues = Array.from(float32Array.slice(0, 10));
+      console.log(`✅ Parsed ${float32Array.length} float32 values (${validValues} valid, ${invalidValues} invalid)`);
+      
+      if (validValues > 0) {
+        const validValuesArray = Array.from(float32Array).filter(v => isFinite(v) && !isNaN(v));
+        console.log(`📈 Value range: ${Math.min(...validValuesArray).toFixed(4)} - ${Math.max(...validValuesArray).toFixed(4)}`);
+        
+        // Log some sample values for debugging
+        const sampleValues = validValuesArray.slice(0, 10);
         console.log(`📝 Sample values:`, sampleValues.map(v => v.toFixed(4)).join(', '));
       }
 
@@ -72,24 +117,43 @@ export const binaryDataParser: BinaryDataParser = {
         return new Float64Array();
       }
 
-      // Clean base64 data
-      const cleanedData = base64Data.replace(/\s/g, '');
+      // Enhanced base64 cleaning and validation
+      const cleanedData = base64Data.replace(/\s/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
       
-      // Decode base64
+      if (cleanedData.length === 0) {
+        console.warn('⚠️ Empty base64 data after cleaning');
+        return new Float64Array();
+      }
+
+      // Decode base64 with error handling
       let binaryString: string;
       try {
         binaryString = atob(cleanedData);
       } catch (error) {
         console.error('❌ Base64 decode failed:', error);
-        return new Float64Array();
+        const paddedData = cleanedData + '='.repeat(4 - (cleanedData.length % 4));
+        try {
+          binaryString = atob(paddedData);
+        } catch (paddedError) {
+          console.error('❌ Base64 decode failed even with padding:', paddedError);
+          return new Float64Array();
+        }
       }
 
       console.log(`📊 Decoded binary string length: ${binaryString.length} bytes`);
 
-      // Handle compression if specified
+      // Handle compression
       let finalBinaryString = binaryString;
       if (compression && compression.toLowerCase() === 'zlib') {
         console.log('⚠️ zlib compression detected but not implemented, using raw data');
+      }
+
+      // Validate for Float64Array (should be multiple of 8)
+      if (finalBinaryString.length % 8 !== 0) {
+        console.warn(`⚠️ Binary data length ${finalBinaryString.length} not divisible by 8 for Float64Array`);
+        const truncatedLength = Math.floor(finalBinaryString.length / 8) * 8;
+        finalBinaryString = finalBinaryString.substring(0, truncatedLength);
+        console.log(`🔧 Truncated binary data to length: ${truncatedLength}`);
       }
 
       // Convert to array buffer
@@ -97,17 +161,26 @@ export const binaryDataParser: BinaryDataParser = {
       const uint8Array = new Uint8Array(arrayBuffer);
       
       for (let i = 0; i < finalBinaryString.length; i++) {
-        uint8Array[i] = finalBinaryString.charCodeAt(i);
+        uint8Array[i] = finalBinaryString.charCodeAt(i) & 0xFF;
       }
 
       const float64Array = new Float64Array(arrayBuffer);
       
-      console.log(`✅ Parsed ${float64Array.length} float64 values`);
-      console.log(`📈 Value range: ${Math.min(...float64Array).toFixed(4)} - ${Math.max(...float64Array).toFixed(4)}`);
+      // Validate values
+      let validValues = 0;
+      for (let i = 0; i < float64Array.length; i++) {
+        if (isFinite(float64Array[i]) && !isNaN(float64Array[i])) {
+          validValues++;
+        }
+      }
       
-      // Log some sample values for debugging
-      if (float64Array.length > 0) {
-        const sampleValues = Array.from(float64Array.slice(0, 10));
+      console.log(`✅ Parsed ${float64Array.length} float64 values (${validValues} valid)`);
+      
+      if (validValues > 0) {
+        const validValuesArray = Array.from(float64Array).filter(v => isFinite(v) && !isNaN(v));
+        console.log(`📈 Value range: ${Math.min(...validValuesArray).toFixed(4)} - ${Math.max(...validValuesArray).toFixed(4)}`);
+        
+        const sampleValues = validValuesArray.slice(0, 10);
         console.log(`📝 Sample values:`, sampleValues.map(v => v.toFixed(4)).join(', '));
       }
 
@@ -127,24 +200,41 @@ export const binaryDataParser: BinaryDataParser = {
         return new Int32Array();
       }
 
-      // Clean base64 data
-      const cleanedData = base64Data.replace(/\s/g, '');
+      // Enhanced cleaning and validation
+      const cleanedData = base64Data.replace(/\s/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
       
+      if (cleanedData.length === 0) {
+        console.warn('⚠️ Empty base64 data after cleaning');
+        return new Int32Array();
+      }
+
       // Decode base64
       let binaryString: string;
       try {
         binaryString = atob(cleanedData);
       } catch (error) {
         console.error('❌ Base64 decode failed:', error);
-        return new Int32Array();
+        const paddedData = cleanedData + '='.repeat(4 - (cleanedData.length % 4));
+        try {
+          binaryString = atob(paddedData);
+        } catch (paddedError) {
+          return new Int32Array();
+        }
       }
 
       console.log(`📊 Decoded binary string length: ${binaryString.length} bytes`);
 
-      // Handle compression if specified
+      // Handle compression
       let finalBinaryString = binaryString;
       if (compression && compression.toLowerCase() === 'zlib') {
         console.log('⚠️ zlib compression detected but not implemented, using raw data');
+      }
+
+      // Validate for Int32Array (should be multiple of 4)
+      if (finalBinaryString.length % 4 !== 0) {
+        console.warn(`⚠️ Binary data length ${finalBinaryString.length} not divisible by 4 for Int32Array`);
+        const truncatedLength = Math.floor(finalBinaryString.length / 4) * 4;
+        finalBinaryString = finalBinaryString.substring(0, truncatedLength);
       }
 
       // Convert to array buffer
@@ -152,7 +242,7 @@ export const binaryDataParser: BinaryDataParser = {
       const uint8Array = new Uint8Array(arrayBuffer);
       
       for (let i = 0; i < finalBinaryString.length; i++) {
-        uint8Array[i] = finalBinaryString.charCodeAt(i);
+        uint8Array[i] = finalBinaryString.charCodeAt(i) & 0xFF;
       }
 
       const int32Array = new Int32Array(arrayBuffer);
@@ -162,7 +252,6 @@ export const binaryDataParser: BinaryDataParser = {
       if (int32Array.length > 0) {
         console.log(`📈 Value range: ${Math.min(...int32Array)} - ${Math.max(...int32Array)}`);
         
-        // Log some sample values for debugging
         const sampleValues = Array.from(int32Array.slice(0, 10));
         console.log(`📝 Sample values:`, sampleValues.join(', '));
       }

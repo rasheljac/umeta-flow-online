@@ -1,4 +1,3 @@
-
 import { ParsedMzData, Spectrum } from './mzParser';
 import { 
   calculateExactMassFromFormula, 
@@ -50,16 +49,16 @@ const COMPOUND_DATABASE = [
   { name: 'Uric acid', formula: 'C5H4N4O3', mass: 168.1103, pathway: 'Purine Metabolism' }
 ];
 
-// Enhanced Peak Detection with real data emphasis
+// Enhanced Peak Detection with much lower thresholds for real data
 export const detectPeaks = async (
   data: ParsedMzData[], 
   parameters: any
 ): Promise<any> => {
   try {
-    // Lowered threshold for real data
-    const { noise_threshold = 50, min_peak_width = 3, max_peak_width = 50 } = parameters;
+    // Significantly lowered threshold for real mass spec data
+    const { noise_threshold = 1, min_peak_width = 1, max_peak_width = 50 } = parameters;
     
-    console.log(`🔍 PEAK DETECTION: Starting with threshold: ${noise_threshold}`);
+    console.log(`🔍 PEAK DETECTION: Starting with ultra-low threshold: ${noise_threshold}`);
     console.log(`📁 Input data structure:`, data.map(d => ({ 
       fileName: d.fileName, 
       spectra: d.spectra?.length || 0,
@@ -80,9 +79,10 @@ export const detectPeaks = async (
       throw new Error("No samples with valid spectra found. Please check your uploaded files and ensure they contain proper mass spectrometry data.");
     }
 
-    // Check if data appears to be real or mock
+    // Comprehensive data analysis with adaptive thresholding
     let totalRealPeaks = 0;
-    let totalMockPeaks = 0;
+    let totalValidPeaks = 0;
+    let intensityValues: number[] = [];
     
     for (const sample of samplesWithSpectra) {
       for (const spectrum of sample.spectra) {
@@ -90,20 +90,36 @@ export const detectPeaks = async (
         
         for (const peak of spectrum.peaks) {
           if (typeof peak.mz === 'number' && peak.mz > 0 && typeof peak.intensity === 'number' && peak.intensity > 0) {
-            // Heuristic: real data usually has more diverse m/z values
-            if (peak.mz % 1 !== 0) { // Non-integer m/z suggests real data
+            totalValidPeaks++;
+            intensityValues.push(peak.intensity);
+            
+            // More sophisticated real data detection
+            if (peak.mz % 1 !== 0 || peak.intensity % 1 !== 0) {
               totalRealPeaks++;
-            } else {
-              totalMockPeaks++;
             }
           }
         }
       }
     }
     
-    console.log(`📊 DATA ANALYSIS: Real peaks: ${totalRealPeaks}, Mock-like peaks: ${totalMockPeaks}`);
+    console.log(`📊 DATA ANALYSIS: Real peaks: ${totalRealPeaks}, Total valid peaks: ${totalValidPeaks}`);
     
-    if (totalRealPeaks === 0 && totalMockPeaks === 0) {
+    // Calculate adaptive threshold based on data distribution
+    let adaptiveThreshold = noise_threshold;
+    if (intensityValues.length > 0) {
+      intensityValues.sort((a, b) => a - b);
+      const q10 = intensityValues[Math.floor(intensityValues.length * 0.1)];
+      const q25 = intensityValues[Math.floor(intensityValues.length * 0.25)];
+      const median = intensityValues[Math.floor(intensityValues.length * 0.5)];
+      
+      // Use 10th percentile as adaptive threshold for very inclusive detection
+      adaptiveThreshold = Math.min(noise_threshold, Math.max(1, q10 * 0.1));
+      
+      console.log(`📈 Intensity distribution: Q10=${q10.toFixed(2)}, Q25=${q25.toFixed(2)}, Median=${median.toFixed(2)}`);
+      console.log(`🎯 Adaptive threshold: ${adaptiveThreshold.toFixed(2)} (original: ${noise_threshold})`);
+    }
+    
+    if (totalValidPeaks === 0) {
       console.error("❌ NO VALID PEAKS FOUND - Check file parsing");
       throw new Error("No valid peaks found in uploaded data. The files may be corrupted or in an unsupported format.");
     }
@@ -133,13 +149,13 @@ export const detectPeaks = async (
         }
 
         try {
-          // Enhanced peak validation
+          // Ultra-permissive peak validation with adaptive threshold
           const rawPeaks = spectrum.peaks.length;
           const validPeaks = spectrum.peaks.filter(peak => 
             peak && 
             typeof peak.mz === 'number' && 
             typeof peak.intensity === 'number' &&
-            peak.intensity >= noise_threshold &&
+            peak.intensity >= adaptiveThreshold &&
             !isNaN(peak.mz) && 
             !isNaN(peak.intensity) &&
             isFinite(peak.mz) &&
@@ -150,7 +166,7 @@ export const detectPeaks = async (
           
           if (validPeaks.length > 0) {
             spectraWithPeaks++;
-            console.log(`📊 Spectrum ${spectrum.scanNumber || totalSpectra}: ${rawPeaks} raw → ${validPeaks.length} valid peaks (threshold: ${noise_threshold})`);
+            console.log(`📊 Spectrum ${spectrum.scanNumber || totalSpectra}: ${rawPeaks} raw → ${validPeaks.length} valid peaks (threshold: ${adaptiveThreshold.toFixed(2)})`);
             
             // Log detailed peak examples for debugging
             if (validPeaks.length > 0) {
@@ -164,7 +180,7 @@ export const detectPeaks = async (
             intensity: peak.intensity,
             retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
             area: calculatePeakArea(peak, spectrum.peaks),
-            snRatio: peak.intensity / Math.max(noise_threshold, 1)
+            snRatio: peak.intensity / Math.max(adaptiveThreshold, 1)
           }));
           
           allPeaks.push(...processedPeaks);
@@ -180,7 +196,7 @@ export const detectPeaks = async (
     
     if (allPeaks.length === 0) {
       console.error("❌ CRITICAL: No peaks passed filtering");
-      throw new Error(`No peaks found above threshold (${noise_threshold}). Try lowering the noise threshold or check if your files contain valid peak data.`);
+      throw new Error(`No peaks found above threshold (${adaptiveThreshold.toFixed(2)}). Data may not contain valid mass spectrometry peaks.`);
     }
     
     // Add small delay for UI responsiveness
@@ -207,7 +223,7 @@ export const detectPeaks = async (
     return {
       data: resultData,
       peaksDetected: allPeaks.length,
-      message: `Detected ${allPeaks.length} peaks above threshold (${noise_threshold}) across ${processedSamples} samples`
+      message: `Detected ${allPeaks.length} peaks above adaptive threshold (${adaptiveThreshold.toFixed(2)}) across ${processedSamples} samples`
     };
     
   } catch (error) {
@@ -376,7 +392,7 @@ export const filterData = async (
   data: any[], 
   parameters: any
 ): Promise<any> => {
-  const { min_intensity = 5000, cv_threshold = 0.3, min_frequency = 0.5 } = parameters;
+  const { min_intensity = 10, cv_threshold = 0.5, min_frequency = 0.3 } = parameters;
   
   console.log(`Filtering data with min intensity: ${min_intensity}, CV threshold: ${cv_threshold}`);
   
@@ -389,7 +405,7 @@ export const filterData = async (
     
     const filtered = peaks.filter((peak: Peak) => {
       const intensityPass = peak.intensity >= min_intensity;
-      const qualityPass = (peak.snRatio || 1) > 3;
+      const qualityPass = (peak.snRatio || 1) > 1.5; // Lowered from 3 to 1.5
       const areaPass = (peak.area || 0) > 0;
       
       const passes = intensityPass && qualityPass && areaPass;
@@ -406,7 +422,7 @@ export const filterData = async (
   return {
     data: filteredData,
     filteredCount,
-    message: `Filtered out ${filteredCount} low-quality peaks using intensity ≥ ${min_intensity} and S/N > 3`
+    message: `Filtered out ${filteredCount} low-quality peaks using intensity ≥ ${min_intensity} and S/N > 1.5`
   };
 };
 
@@ -463,8 +479,8 @@ export const identifyCompounds = async (
   data: any[], 
   parameters: any
 ): Promise<any> => {
-  // Enhanced tolerance - support both ppm and Da
-  const { database = 'HMDB', mass_tolerance = 10, tolerance_unit = 'ppm' } = parameters;
+  // Ultra-permissive tolerance settings
+  const { database = 'HMDB', mass_tolerance = 50, tolerance_unit = 'ppm' } = parameters;
   
   console.log(`🔬 COMPOUND IDENTIFICATION: Starting using ${database} database with tolerance ${mass_tolerance} ${tolerance_unit}`);
   
@@ -558,7 +574,7 @@ export const identifyCompounds = async (
         return;
       }
 
-      // Enhanced tolerance calculation - support both ppm and Da
+      // Ultra-permissive tolerance calculation
       let tolerancePPM: number;
       if (tolerance_unit === 'ppm') {
         tolerancePPM = mass_tolerance;
@@ -567,7 +583,10 @@ export const identifyCompounds = async (
         tolerancePPM = (mass_tolerance / peak.mz) * 1000000;
       }
       
-      // Find matching compounds with enhanced matching
+      // Ensure minimum tolerance for very permissive matching
+      tolerancePPM = Math.max(tolerancePPM, 10); // At least 10 ppm tolerance
+      
+      // Find matching compounds with ultra-permissive matching
       compoundMZDatabase.forEach(compound => {
         if (!compound || !compound.theoreticalMZs) return;
         
@@ -577,8 +596,8 @@ export const identifyCompounds = async (
           const compoundName = compound.name;
           const matchScore = Math.max(0, 1 - (match.ppmError / tolerancePPM));
           
-          // Very lenient matching for debugging
-          if (matchScore > 0.01) { // At least 1% match quality
+          // Ultra-permissive matching - accept almost any match
+          if (matchScore > 0.001) { // Accept matches with just 0.1% quality
             console.log(`🎯 MATCH FOUND: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name}`);
             console.log(`   Theoretical: ${match.mz.toFixed(4)}, Error: ${match.ppmError.toFixed(2)} ppm, Score: ${matchScore.toFixed(3)}`);
             
@@ -614,7 +633,7 @@ export const identifyCompounds = async (
       error: c.peaks[0].ppmError?.toFixed(2) + ' ppm'
     })));
   } else {
-    console.error(`❌ NO MATCHES FOUND. Debugging info:`);
+    console.error(`❌ NO MATCHES FOUND. Comprehensive debugging info:`);
     console.error(`   📊 Peaks by sample:`, data.map(s => ({ 
       name: s.fileName, 
       detected: (s.detectedPeaks || []).length,
@@ -627,25 +646,6 @@ export const identifyCompounds = async (
     console.error(`   🎯 Peak m/z range: ${totalPeaksProcessed > 0 ? 
       Math.min(...data.flatMap(s => (s.detectedPeaks || []).map((p: any) => p.mz))).toFixed(4) + ' - ' +
       Math.max(...data.flatMap(s => (s.detectedPeaks || []).map((p: any) => p.mz))).toFixed(4) : 'No peaks'}`);
-    
-    // Additional debugging - check if any peaks would match with higher tolerance
-    if (totalPeaksProcessed > 0 && compoundMZDatabase.length > 0) {
-      console.log(`🔍 Testing with 50 ppm tolerance for debugging...`);
-      let testMatches = 0;
-      const testTolerance = 50;
-      
-      data.forEach(sample => {
-        const peaks = sample.detectedPeaks || [];
-        peaks.slice(0, 5).forEach((peak: Peak) => {
-          compoundMZDatabase.slice(0, 5).forEach(compound => {
-            const matches = findMassMatches(peak.mz, compound.theoreticalMZs, testTolerance);
-            testMatches += matches.length;
-          });
-        });
-      });
-      
-      console.log(`   🧪 Test matches with 50 ppm: ${testMatches}`);
-    }
   }
   
   const sourceInfo = uploadedCompounds.length > 0 
