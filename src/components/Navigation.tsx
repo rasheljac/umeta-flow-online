@@ -34,7 +34,7 @@ const Navigation = () => {
           <div className="flex items-center space-x-8">
             <Link to="/" className="flex items-center space-x-3">
               {/* Logo branding with proper aspect ratio */}
-              <div className="h-7">
+              <div className="h-10">
                 <AspectRatio ratio={1} className="h-full">
                   <img
                     src="/lovable-uploads/9521b0f4-3d7b-4906-a9fc-de87f5126a5a.png"
