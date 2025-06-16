@@ -1,5 +1,4 @@
-
-import { FileText, Download, Eye, BarChart3 } from "lucide-react";
+import { FileText, Download, Eye, BarChart3, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ResultsPanel from "@/components/ResultsPanel";
@@ -9,6 +8,17 @@ import { useState, useEffect } from "react";
 import { processingService } from "@/services/processingService";
 import { ParsedMzData } from "@/utils/mzParser";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const Results = () => {
   const [results, setResults] = useState<any>(null);
@@ -108,6 +118,22 @@ const Results = () => {
     }
   };
 
+  const handleResetAnalysis = () => {
+    // Clear all analysis-related data from localStorage
+    localStorage.removeItem('lastProcessingResult');
+    localStorage.removeItem('myAnalyses');
+    localStorage.removeItem('myAnalysesLight');
+    
+    // Reset component state
+    setResults(null);
+    setUploadedData([]);
+    
+    toast({
+      title: "Analysis reset complete",
+      description: "All analysis results have been cleared. You can now start a fresh analysis.",
+    });
+  };
+
   const generateExportCSV = (results: any) => {
     let csvContent = 'Analysis Summary\n';
     csvContent += `Date,${new Date().toISOString()}\n`;
@@ -150,6 +176,33 @@ const Results = () => {
               <h1 className="text-xl font-bold text-slate-900">Analysis Results</h1>
             </div>
             <div className="flex space-x-2">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Reset Analysis
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Reset Analysis Results</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete all analysis results and clear your data. 
+                      You'll need to run a new workflow to generate results again. 
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction 
+                      onClick={handleResetAnalysis}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Reset All Data
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               <Button 
                 variant="outline" 
                 size="sm"
