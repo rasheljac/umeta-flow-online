@@ -1,4 +1,5 @@
-import { parseBinaryData, extractPeaksFromBinaryArrays } from './binaryDataParser';
+
+import { parseBinaryData, extractPeaksFromBinaryArrays, validatePeakData } from './binaryDataParser';
 
 export interface Peak {
   mz: number;
@@ -81,6 +82,8 @@ const extractMzDataFromDOM = (xmlDoc: Document, fileName: string): ParsedMzData 
     throw new Error('Invalid mzML/mzXML file format');
   }
 
+  console.log(`Parsing ${fileName}: detected format ${mzMLRoot ? 'mzML' : 'mzXML'}`);
+
   // Extract instrument information
   const instrumentModel = extractInstrumentModelFromDOM(xmlDoc);
   
@@ -100,6 +103,8 @@ const extractMzDataFromDOM = (xmlDoc: Document, fileName: string): ParsedMzData 
   const msLevels = [...new Set(spectra.map(s => s.msLevel))].sort();
   const scanNumbers = spectra.map(s => s.scanNumber);
   const retentionTimes = spectra.map(s => s.retentionTime);
+
+  console.log(`Parsing complete: ${spectra.length} spectra, ${chromatograms.length} chromatograms`);
 
   return {
     fileName,
@@ -152,28 +157,24 @@ const extractSpectraFromDOM = (xmlDoc: Document): Spectrum[] => {
   
   console.log(`Found ${spectrumElements.length} spectrum elements`);
   
+  let successfullyParsed = 0;
+  let failedToParse = 0;
+  
   spectrumElements.forEach((spectrumEl, index) => {
     const spectrum = extractSpectrumFromElement(spectrumEl, index);
     if (spectrum) {
       spectra.push(spectrum);
+      successfullyParsed++;
+    } else {
+      failedToParse++;
     }
   });
   
-  // Only generate mock data if no real spectra were found
-  if (spectra.length === 0) {
-    console.warn('No real spectra found, generating mock data for testing');
-    for (let i = 0; i < 10; i++) {
-      spectra.push({
-        id: `spectrum_${i}`,
-        scanNumber: i + 1,
-        msLevel: 1,
-        retentionTime: i * 0.5,
-        basePeakMz: 200 + i * 10,
-        basePeakIntensity: 1000 + Math.random() * 5000,
-        totalIonCurrent: 5000 + Math.random() * 10000,
-        peaks: generateMockPeaks(20)
-      });
-    }
+  console.log(`Spectrum parsing results: ${successfullyParsed} successful, ${failedToParse} failed`);
+  
+  // Only fall back to mock data if absolutely no real spectra were found
+  if (spectra.length === 0 && spectrumElements.length > 0) {
+    console.warn('Failed to parse any real spectra, this may indicate binary data parsing issues');
   }
   
   return spectra;
@@ -230,6 +231,12 @@ const extractSpectrumFromElement = (element: Element, index: number): Spectrum |
     // Parse binary data arrays for real peaks
     const peaks = parseRealPeaksFromSpectrum(element);
     
+    // Validate parsed peaks
+    if (!validatePeakData(peaks)) {
+      console.warn(`Invalid peak data for spectrum ${id}, skipping`);
+      return null;
+    }
+    
     // Update base peak and TIC if we have real data
     if (peaks.length > 0) {
       const maxIntensityPeak = peaks.reduce((max, peak) => 
@@ -241,6 +248,10 @@ const extractSpectrumFromElement = (element: Element, index: number): Spectrum |
       if (totalIonCurrent === 0) {
         totalIonCurrent = peaks.reduce((sum, peak) => sum + peak.intensity, 0);
       }
+    } else {
+      // If no valid peaks were extracted, skip this spectrum
+      console.warn(`No valid peaks found in spectrum ${id}`);
+      return null;
     }
     
     return {
@@ -248,10 +259,10 @@ const extractSpectrumFromElement = (element: Element, index: number): Spectrum |
       scanNumber,
       msLevel,
       retentionTime,
-      basePeakMz: basePeakMz || peaks[0]?.mz || 200,
-      basePeakIntensity: basePeakIntensity || Math.max(...peaks.map(p => p.intensity)) || 1000,
-      totalIonCurrent: totalIonCurrent || peaks.reduce((sum, p) => sum + p.intensity, 0) || 5000,
-      peaks: peaks.length > 0 ? peaks : generateMockPeaks(30)
+      basePeakMz,
+      basePeakIntensity,
+      totalIonCurrent,
+      peaks
     };
   } catch (error) {
     console.warn('Failed to extract spectrum:', error);
@@ -264,7 +275,7 @@ const parseRealPeaksFromSpectrum = (spectrumElement: Element): Peak[] => {
     // Look for binary data arrays in mzML format
     const binaryArrayList = spectrumElement.querySelector('binaryDataArrayList');
     if (!binaryArrayList) {
-      console.log('No binary data arrays found, using fallback peak parsing');
+      console.log('No binary data arrays found in spectrum');
       return [];
     }
 
@@ -283,9 +294,17 @@ const parseRealPeaksFromSpectrum = (spectrumElement: Element): Peak[] => {
       const arrayLength = arrayLengthElement ? 
         parseInt(arrayLengthElement.getAttribute('value') || '0') : 0;
 
-      if (arrayLength === 0) continue;
+      if (arrayLength === 0) {
+        console.log('Binary array has zero length, skipping');
+        continue;
+      }
 
       const binaryData = parseBinaryData(binaryArray, arrayLength);
+      
+      if (binaryData.data.length === 0) {
+        console.log(`Failed to parse binary data for ${binaryData.arrayType} array`);
+        continue;
+      }
       
       if (binaryData.arrayType === 'mz') {
         mzArray = binaryData.data;
@@ -297,10 +316,11 @@ const parseRealPeaksFromSpectrum = (spectrumElement: Element): Peak[] => {
     // Extract peaks from arrays
     if (mzArray.length > 0 && intensityArray.length > 0) {
       const peaks = extractPeaksFromBinaryArrays(mzArray, intensityArray);
-      console.log(`Extracted ${peaks.length} real peaks from binary data`);
+      console.log(`Successfully extracted ${peaks.length} real peaks from binary data`);
       return peaks;
     }
 
+    console.log('No valid peak arrays found');
     return [];
   } catch (error) {
     console.error('Error parsing real peaks:', error);
@@ -315,15 +335,38 @@ const extractChromatogramsFromDOM = (xmlDoc: Document): Chromatogram[] => {
   chromElements.forEach(chromEl => {
     const id = chromEl.getAttribute('id') || 'chromatogram';
     
-    // Generate mock time and intensity arrays
-    const timeArray = generateMockTimeArray(100);
-    const intensityArray = generateMockIntensityArray(100);
-    
-    chromatograms.push({
-      id,
-      timeArray,
-      intensityArray
-    });
+    // Try to parse real chromatogram data
+    const binaryArrayList = chromEl.querySelector('binaryDataArrayList');
+    if (binaryArrayList) {
+      const binaryArrays = binaryArrayList.querySelectorAll('binaryDataArray');
+      
+      let timeArray: number[] = [];
+      let intensityArray: number[] = [];
+      
+      for (const binaryArray of binaryArrays) {
+        const arrayLengthElement = binaryArray.querySelector('cvParam[name="binary data array length"]');
+        const arrayLength = arrayLengthElement ? 
+          parseInt(arrayLengthElement.getAttribute('value') || '0') : 0;
+
+        if (arrayLength > 0) {
+          const binaryData = parseBinaryData(binaryArray, arrayLength);
+          
+          if (binaryData.arrayType === 'time') {
+            timeArray = binaryData.data;
+          } else if (binaryData.arrayType === 'intensity') {
+            intensityArray = binaryData.data;
+          }
+        }
+      }
+      
+      if (timeArray.length > 0 && intensityArray.length > 0) {
+        chromatograms.push({
+          id,
+          timeArray,
+          intensityArray
+        });
+      }
+    }
   });
   
   return chromatograms;
@@ -339,22 +382,4 @@ const generateTICFromSpectra = (spectra: Spectrum[]): Chromatogram => {
     timeArray,
     intensityArray
   };
-};
-
-// Helper functions for generating mock data
-const generateMockTimeArray = (length: number): number[] => {
-  return Array.from({ length }, (_, i) => i * 0.1);
-};
-
-const generateMockIntensityArray = (length: number): number[] => {
-  return Array.from({ length: Math.min(length, 500) }, () => 
-    Math.random() * 10000 + 1000
-  );
-};
-
-const generateMockPeaks = (count: number): Peak[] => {
-  return Array.from({ length: count }, (_, i) => ({
-    mz: 100 + (i * 10) + Math.random() * 5,
-    intensity: Math.random() * 5000 + 500
-  }));
 };

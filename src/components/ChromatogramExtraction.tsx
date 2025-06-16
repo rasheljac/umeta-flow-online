@@ -55,19 +55,20 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
       console.log('Input data structure:', uploadedData.map(d => ({ 
         fileName: d.fileName, 
         spectra: d.spectra?.length || 0,
-        hasSpectra: !!d.spectra 
+        totalPeaks: d.spectra?.reduce((sum: number, s: any) => sum + (s.peaks?.length || 0), 0) || 0
       })));
 
       // Extract chromatogram from uploaded data
       const chromatogramData: any[] = [];
       let totalSpectraProcessed = 0;
       let totalPeaksFound = 0;
+      let validSpectraCount = 0;
 
       uploadedData.forEach((sample, sampleIndex) => {
         console.log(`Processing sample ${sampleIndex}: ${sample.fileName || 'Unknown'}`);
         
-        // Handle different data structures
-        const spectraArray = sample.spectra || sample.data || [];
+        // Access spectra directly from the parsed data
+        const spectraArray = sample.spectra || [];
         
         if (!Array.isArray(spectraArray)) {
           console.warn(`Sample ${sample.fileName} has invalid spectra format:`, typeof spectraArray);
@@ -90,10 +91,10 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
             return;
           }
 
-          // Handle different retention time field names
-          const retentionTime = spectrum.retentionTime || spectrum.retention_time || spectrum.rt || spectrum.time || 0;
+          // Get retention time
+          const retentionTime = spectrum.retentionTime || 0;
           
-          if (typeof retentionTime !== 'number') {
+          if (typeof retentionTime !== 'number' || isNaN(retentionTime)) {
             console.warn(`Invalid retention time in spectrum ${spectrumIndex}: ${retentionTime}`);
             return;
           }
@@ -102,38 +103,41 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
           if (rtStart !== undefined && retentionTime < rtStart) return;
           if (rtEnd !== undefined && retentionTime > rtEnd) return;
 
-          // Handle different peaks field names and structures
-          const peaks = spectrum.peaks || spectrum.data || spectrum.mzIntensityPairs || [];
+          // Access peaks from the spectrum
+          const peaks = spectrum.peaks || [];
           
           if (!Array.isArray(peaks)) {
             console.warn(`Invalid peaks format in spectrum ${spectrumIndex}: ${typeof peaks}`);
             return;
           }
 
-          // Find peaks within m/z tolerance with enhanced matching
+          if (peaks.length === 0) {
+            console.warn(`No peaks in spectrum ${spectrumIndex}`);
+            return;
+          }
+
+          validSpectraCount++;
+
+          // Find peaks within m/z tolerance
           let totalIntensity = 0;
           let peaksInRange = 0;
           let bestPeakIntensity = 0;
           
           peaks.forEach((peak: any) => {
-            // Handle different peak structures
-            let peakMz: number;
-            let peakIntensity: number;
-            
-            if (typeof peak === 'object' && peak !== null) {
-              // Object format: {mz: number, intensity: number}
-              peakMz = peak.mz || peak.mass || peak.m || 0;
-              peakIntensity = peak.intensity || peak.i || peak.abundance || 0;
-            } else if (Array.isArray(peak) && peak.length >= 2) {
-              // Array format: [mz, intensity]
-              peakMz = peak[0] || 0;
-              peakIntensity = peak[1] || 0;
-            } else {
-              return; // Skip invalid peak format
+            // Validate peak structure
+            if (!peak || typeof peak !== 'object') {
+              return;
             }
+
+            const peakMz = peak.mz;
+            const peakIntensity = peak.intensity;
             
             if (typeof peakMz !== 'number' || typeof peakIntensity !== 'number') {
-              return; // Skip invalid peak data
+              return;
+            }
+            
+            if (isNaN(peakMz) || isNaN(peakIntensity) || !isFinite(peakMz) || !isFinite(peakIntensity)) {
+              return;
             }
             
             // Enhanced m/z matching with both absolute and ppm tolerance
@@ -145,7 +149,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
               ? mzDiffAbs <= tolerance 
               : mzDiffPpm <= tolerance;
             
-            if (toleranceMatches) {
+            if (toleranceMatches && peakIntensity > 0) {
               totalIntensity += peakIntensity;
               peaksInRange++;
               bestPeakIntensity = Math.max(bestPeakIntensity, peakIntensity);
@@ -153,7 +157,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
             }
           });
 
-          // Only add data points with significant intensity
+          // Add data points with intensity above zero
           if (totalIntensity > 0) {
             chromatogramData.push({
               retentionTime: retentionTime,
@@ -172,6 +176,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
       chromatogramData.sort((a, b) => a.retentionTime - b.retentionTime);
       
       console.log(`Extraction complete: ${chromatogramData.length} data points found from ${totalSpectraProcessed} spectra`);
+      console.log(`Valid spectra with peaks: ${validSpectraCount}`);
       console.log(`Total peaks found in range: ${totalPeaksFound}`);
       console.log('Sample data points:', chromatogramData.slice(0, 5));
       
@@ -181,14 +186,14 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
         const toleranceType = tolerance < 1 ? 'Da' : 'ppm';
         toast({
           title: "No data found",
-          description: `No peaks found for m/z ${mzTarget} within tolerance ${tolerance} ${toleranceType}. Processed ${totalSpectraProcessed} spectra. Try increasing the tolerance or checking your m/z value.`,
+          description: `No peaks found for m/z ${mzTarget} within tolerance ${tolerance} ${toleranceType}. Processed ${totalSpectraProcessed} spectra (${validSpectraCount} had valid peaks). Try increasing the tolerance or checking your m/z value.`,
           variant: "destructive"
         });
       } else {
         const toleranceType = tolerance < 1 ? 'Da' : 'ppm';
         toast({
           title: "Extraction complete",
-          description: `Found ${chromatogramData.length} data points for m/z ${mzTarget} ± ${tolerance} ${toleranceType} (from ${totalPeaksFound} matching peaks across ${totalSpectraProcessed} spectra)`
+          description: `Found ${chromatogramData.length} data points for m/z ${mzTarget} ± ${tolerance} ${toleranceType} (from ${totalPeaksFound} matching peaks across ${validSpectraCount} valid spectra)`
         });
       }
     } catch (error) {
@@ -245,7 +250,14 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
 
   const uniqueSamples = [...new Set(extractedData.map(d => d.sample))];
   const hasData = uploadedData && uploadedData.length > 0;
-  const dataInfo = hasData ? `${uploadedData.length} samples loaded` : 'No data loaded';
+  
+  // Enhanced data validation
+  const dataInfo = hasData ? {
+    samples: uploadedData.length,
+    totalSpectra: uploadedData.reduce((sum, d) => sum + (d.spectra?.length || 0), 0),
+    totalPeaks: uploadedData.reduce((sum, d) => 
+      sum + (d.spectra?.reduce((specSum: number, s: any) => specSum + (s.peaks?.length || 0), 0) || 0), 0)
+  } : null;
 
   return (
     <div className="space-y-6">
@@ -256,7 +268,14 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
             <span>Extract Ion Chromatogram</span>
           </CardTitle>
           <div className="text-sm text-slate-600">
-            {dataInfo} | Status: {hasData ? 'Ready for extraction' : 'Upload data files first'}
+            {hasData ? (
+              <div>
+                {dataInfo?.samples} samples loaded | {dataInfo?.totalSpectra} spectra | {dataInfo?.totalPeaks} total peaks
+                <br />Status: Ready for extraction
+              </div>
+            ) : (
+              'No data loaded | Upload data files first'
+            )}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -284,6 +303,9 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
                 onChange={(e) => setExtractionParams(prev => ({ ...prev, mzTolerance: e.target.value }))}
                 disabled={!hasData}
               />
+              <div className="text-xs text-slate-500 mt-1">
+                &lt; 1: Da, ≥ 1: ppm
+              </div>
             </div>
             <div>
               <Label htmlFor="rtStart">RT Start (min)</Label>
@@ -344,7 +366,7 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
           <CardHeader>
             <CardTitle>Extracted Ion Chromatogram</CardTitle>
             <div className="text-sm text-slate-600">
-              m/z {extractionParams.mzValue} ± {extractionParams.mzTolerance} Da | 
+              m/z {extractionParams.mzValue} ± {extractionParams.mzTolerance} {parseFloat(extractionParams.mzTolerance) < 1 ? 'Da' : 'ppm'} | 
               {extractedData.length} data points across {uniqueSamples.length} samples
             </div>
           </CardHeader>

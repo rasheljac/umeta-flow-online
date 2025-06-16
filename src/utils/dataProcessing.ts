@@ -1,4 +1,3 @@
-
 import { ParsedMzData, Spectrum } from './mzParser';
 import { 
   calculateExactMassFromFormula, 
@@ -59,7 +58,11 @@ export const detectPeaks = async (
     const { noise_threshold = 1000, min_peak_width = 3, max_peak_width = 50 } = parameters;
     
     console.log(`Detecting peaks with threshold: ${noise_threshold}`);
-    console.log(`Input data structure:`, data.map(d => ({ fileName: d.fileName, spectra: d.spectra?.length || 0 })));
+    console.log(`Input data structure:`, data.map(d => ({ 
+      fileName: d.fileName, 
+      spectra: d.spectra?.length || 0,
+      totalPeaks: d.spectra?.reduce((sum, s) => sum + (s.peaks?.length || 0), 0) || 0
+    })));
     
     if (!Array.isArray(data) || data.length === 0) {
       throw new Error("Invalid data format: expected array of samples");
@@ -86,18 +89,23 @@ export const detectPeaks = async (
         }
 
         try {
-          // Enhanced peak detection with validation
-          const detectedPeaks = findLocalMaxima(spectrum.peaks, noise_threshold, min_peak_width);
+          // Use real peaks from the spectrum instead of detecting new ones
+          const validPeaks = spectrum.peaks.filter(peak => 
+            peak && 
+            typeof peak.mz === 'number' && 
+            typeof peak.intensity === 'number' &&
+            peak.intensity >= noise_threshold &&
+            !isNaN(peak.mz) && 
+            !isNaN(peak.intensity)
+          );
           
-          const processedPeaks = detectedPeaks
-            .filter(peak => peak && typeof peak.mz === 'number' && typeof peak.intensity === 'number')
-            .map(peak => ({
-              mz: peak.mz,
-              intensity: peak.intensity,
-              retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
-              area: calculatePeakArea(peak, spectrum.peaks),
-              snRatio: peak.intensity / noise_threshold
-            }));
+          const processedPeaks = validPeaks.map(peak => ({
+            mz: peak.mz,
+            intensity: peak.intensity,
+            retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
+            area: calculatePeakArea(peak, spectrum.peaks),
+            snRatio: peak.intensity / noise_threshold
+          }));
           
           allPeaks.push(...processedPeaks);
           samplePeaks += processedPeaks.length;
@@ -106,7 +114,7 @@ export const detectPeaks = async (
         }
       }
       
-      console.log(`Sample ${sample.fileName}: detected ${samplePeaks} peaks`);
+      console.log(`Sample ${sample.fileName}: detected ${samplePeaks} peaks above threshold`);
       processedSamples++;
     }
     
@@ -127,12 +135,12 @@ export const detectPeaks = async (
       };
     });
     
-    console.log(`Peak detection complete: ${allPeaks.length} total peaks across ${processedSamples} samples`);
+    console.log(`Peak detection complete: ${allPeaks.length} total peaks above threshold across ${processedSamples} samples`);
     
     return {
       data: resultData,
       peaksDetected: allPeaks.length,
-      message: `Detected ${allPeaks.length} peaks across ${processedSamples} samples`
+      message: `Detected ${allPeaks.length} peaks above threshold (${noise_threshold}) across ${processedSamples} samples`
     };
     
   } catch (error) {
@@ -141,55 +149,17 @@ export const detectPeaks = async (
   }
 };
 
-// Robust helper function to find local maxima
-function findLocalMaxima(peaks: any[], threshold: number, minWidth: number): any[] {
-  if (!Array.isArray(peaks) || peaks.length === 0) {
-    return [];
-  }
-
-  const localMaxima = [];
-  const safeMinWidth = Math.max(1, Math.min(minWidth, Math.floor(peaks.length / 4)));
-  
-  for (let i = safeMinWidth; i < peaks.length - safeMinWidth; i++) {
-    const currentPeak = peaks[i];
-    
-    if (!currentPeak || 
-        typeof currentPeak.intensity !== 'number' || 
-        typeof currentPeak.mz !== 'number' ||
-        currentPeak.intensity < threshold) {
-      continue;
-    }
-    
-    let isLocalMaximum = true;
-    
-    // Check surrounding peaks
-    for (let j = i - safeMinWidth; j <= i + safeMinWidth && isLocalMaximum; j++) {
-      if (j !== i && peaks[j] && typeof peaks[j].intensity === 'number') {
-        if (peaks[j].intensity >= currentPeak.intensity) {
-          isLocalMaximum = false;
-        }
-      }
-    }
-    
-    if (isLocalMaximum) {
-      localMaxima.push(currentPeak);
-    }
-  }
-  
-  return localMaxima;
-}
-
 // Enhanced peak area calculation
 function calculatePeakArea(peak: any, allPeaks: any[]): number {
   if (!peak || !Array.isArray(allPeaks) || allPeaks.length === 0) {
-    return 0;
+    return peak?.intensity || 0;
   }
 
   const peakIndex = allPeaks.findIndex(p => 
     p && Math.abs(p.mz - peak.mz) < 0.001
   );
   
-  if (peakIndex === -1) return 0;
+  if (peakIndex === -1) return peak.intensity;
   
   const windowSize = Math.min(3, Math.floor(allPeaks.length / 4));
   let area = 0;
@@ -210,7 +180,7 @@ function calculatePeakArea(peak: any, allPeaks: any[]): number {
     }
   }
   
-  return Math.max(0, area);
+  return Math.max(peak.intensity, area);
 }
 
 // Enhanced Peak Alignment with better error handling
@@ -441,7 +411,6 @@ export const identifyCompounds = async (
   const compoundsToSearch = uploadedCompounds.length > 0 ? uploadedCompounds : COMPOUND_DATABASE;
   
   console.log(`Searching against ${compoundsToSearch.length} compounds`);
-  console.log('Sample compound structures:', compoundsToSearch.slice(0, 2));
   
   // Pre-calculate theoretical m/z values for all compounds
   const compoundMZDatabase = compoundsToSearch.map(compound => {
@@ -471,7 +440,7 @@ export const identifyCompounds = async (
         return;
       }
 
-      // Convert mass tolerance from Da to ppm if needed
+      // Convert mass tolerance from Da to ppm if needed (more robust tolerance handling)
       const tolerancePPM = mass_tolerance < 1 ? (mass_tolerance / peak.mz * 1000000) : mass_tolerance;
       
       // Find matching compounds
@@ -482,7 +451,7 @@ export const identifyCompounds = async (
           const compoundName = compound.compound || compound.name;
           const matchScore = Math.max(0, 1 - (match.ppmError / tolerancePPM));
           
-          console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name} (theoretical: ${match.mz.toFixed(4)}, error: ${match.ppmError.toFixed(2)} ppm)`);
+          console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name} (theoretical: ${match.mz.toFixed(4)}, error: ${match.ppmError.toFixed(2)} ppm, score: ${matchScore.toFixed(3)})`);
           
           identifiedCompounds.push({
             id: `${compoundName}_${match.mode.name}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
@@ -513,7 +482,7 @@ export const identifyCompounds = async (
       identifiedCompounds: identifiedCompounds.filter(c => c.id.includes(sample.fileName || `_${index}_`))
     })),
     compoundsIdentified: identifiedCompounds.length,
-    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} with ionization modes (processed ${totalPeaksProcessed} peaks, tolerance: ${mass_tolerance} Da/ppm)`
+    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} using ionization mode matching (processed ${totalPeaksProcessed} peaks, tolerance: ${mass_tolerance} Da/ppm)`
   };
 };
 

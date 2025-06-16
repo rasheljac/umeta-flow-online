@@ -41,10 +41,11 @@ export const parseBinaryData = (
       bytes[i] = binaryString.charCodeAt(i);
     }
 
-    // Handle compression (simplified - in production use proper zlib/gzip libraries)
+    // Handle compression - for now, we'll work with uncompressed data
     let decodedBytes = bytes;
     if (compression === 'zlib') {
-      console.warn('Zlib compression detected but not fully supported - using raw data');
+      console.warn('Zlib compression detected - trying to parse raw data. For full zlib support, additional library needed.');
+      // Try to parse anyway - some files may not be properly compressed
     }
 
     // Convert bytes to numbers based on precision
@@ -52,28 +53,36 @@ export const parseBinaryData = (
     const bytesPerFloat = precision === 64 ? 8 : 4;
     const expectedBytes = arrayLength * bytesPerFloat;
     
+    console.log(`Parsing binary array: type=${arrayType}, length=${arrayLength}, precision=${precision}, compression=${compression}`);
+    console.log(`Expected ${expectedBytes} bytes, got ${decodedBytes.length} bytes`);
+    
     if (decodedBytes.length >= expectedBytes) {
-      const dataView = new DataView(decodedBytes.buffer);
+      const dataView = new DataView(decodedBytes.buffer, decodedBytes.byteOffset);
       for (let i = 0; i < arrayLength; i++) {
         const offset = i * bytesPerFloat;
-        if (precision === 64) {
-          data.push(dataView.getFloat64(offset, true)); // little endian
-        } else {
-          data.push(dataView.getFloat32(offset, true)); // little endian
+        try {
+          if (precision === 64) {
+            const value = dataView.getFloat64(offset, true); // little endian
+            if (!isNaN(value) && isFinite(value)) {
+              data.push(value);
+            }
+          } else {
+            const value = dataView.getFloat32(offset, true); // little endian
+            if (!isNaN(value) && isFinite(value)) {
+              data.push(value);
+            }
+          }
+        } catch (error) {
+          console.warn(`Error reading value at offset ${offset}:`, error);
+          break;
         }
       }
+      
+      console.log(`Successfully parsed ${data.length} values from binary data`);
     } else {
       console.warn(`Binary data length mismatch: expected ${expectedBytes} bytes, got ${decodedBytes.length}`);
-      // Fallback: generate mock data for testing
-      for (let i = 0; i < arrayLength; i++) {
-        if (arrayType === 'mz') {
-          data.push(100 + i * 0.5 + Math.random() * 0.1);
-        } else if (arrayType === 'intensity') {
-          data.push(Math.random() * 10000 + 1000);
-        } else {
-          data.push(i * 0.1);
-        }
-      }
+      // Return empty array instead of mock data to signal parsing failure
+      return { data: [], precision, compression, arrayType };
     }
 
     return { data, precision, compression, arrayType };
@@ -90,14 +99,40 @@ export const extractPeaksFromBinaryArrays = (
   const peaks = [];
   const length = Math.min(mzArray.length, intensityArray.length);
   
+  console.log(`Extracting peaks from arrays: ${mzArray.length} m/z values, ${intensityArray.length} intensity values`);
+  
   for (let i = 0; i < length; i++) {
-    if (intensityArray[i] > 0) { // Only include non-zero intensities
+    const mz = mzArray[i];
+    const intensity = intensityArray[i];
+    
+    // Only include valid, non-zero intensities
+    if (intensity > 0 && !isNaN(mz) && !isNaN(intensity) && isFinite(mz) && isFinite(intensity)) {
       peaks.push({
-        mz: mzArray[i],
-        intensity: intensityArray[i]
+        mz: mz,
+        intensity: intensity
       });
     }
   }
   
+  console.log(`Extracted ${peaks.length} valid peaks`);
   return peaks;
+};
+
+// Helper function to validate peak data structure
+export const validatePeakData = (peaks: any[]): boolean => {
+  if (!Array.isArray(peaks) || peaks.length === 0) {
+    return false;
+  }
+  
+  // Check if peaks have the expected structure
+  return peaks.every(peak => 
+    peak && 
+    typeof peak === 'object' && 
+    typeof peak.mz === 'number' && 
+    typeof peak.intensity === 'number' && 
+    !isNaN(peak.mz) && 
+    !isNaN(peak.intensity) &&
+    isFinite(peak.mz) && 
+    isFinite(peak.intensity)
+  );
 };
