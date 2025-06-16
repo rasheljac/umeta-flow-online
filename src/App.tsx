@@ -14,7 +14,6 @@ import AuthPage from "./components/AuthPage";
 import NotFound from "./pages/NotFound";
 import MyAnalysis from "@/pages/MyAnalysis";
 import Profile from "@/pages/Profile";
-import Settings from "@/pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -44,15 +43,14 @@ const App = () => (
                   <Results />
                 </ProtectedRoute>
               } />
-              <Route path="/my-analysis" element={<MyAnalysis />} />
+              <Route path="/my-analysis" element={
+                <ProtectedRoute>
+                  <MyAnalysis />
+                </ProtectedRoute>
+              } />
               <Route path="/profile" element={
                 <ProtectedRoute>
                   <Profile />
-                </ProtectedRoute>
-              } />
-              <Route path="/settings" element={
-                <ProtectedRoute>
-                  <Settings />
                 </ProtectedRoute>
               } />
               <Route path="*" element={<NotFound />} />
@@ -65,4 +63,3 @@ const App = () => (
 );
 
 export default App;
-

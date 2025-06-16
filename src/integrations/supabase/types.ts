@@ -9,6 +9,39 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      analysis_runs: {
+        Row: {
+          created_at: string
+          id: string
+          results: Json | null
+          status: string
+          summary: Json | null
+          updated_at: string
+          user_id: string
+          workflow_name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          results?: Json | null
+          status?: string
+          summary?: Json | null
+          updated_at?: string
+          user_id: string
+          workflow_name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          results?: Json | null
+          status?: string
+          summary?: Json | null
+          updated_at?: string
+          user_id?: string
+          workflow_name?: string
+        }
+        Relationships: []
+      }
       chromatograms: {
         Row: {
           chromatogram_id: string
@@ -198,6 +231,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_url: string | null
           created_at: string
           email: string
           full_name: string | null
@@ -206,6 +240,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
           email: string
           full_name?: string | null
@@ -214,6 +249,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
           email?: string
           full_name?: string | null

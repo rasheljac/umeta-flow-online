@@ -2,7 +2,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from './AuthProvider';
-import { Microscope, Upload, Settings as SettingsIcon, BarChart3, LogOut, User } from 'lucide-react';
+import { Microscope, Upload, BarChart3, LogOut, User, History } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,7 +49,7 @@ const Navigation = () => {
                 to="/workflows" 
                 className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
               >
-                <SettingsIcon className="w-4 h-4" />
+                <Microscope className="w-4 h-4" />
                 <span>Workflows</span>
               </Link>
               <Link 
@@ -60,18 +60,11 @@ const Navigation = () => {
                 <span>Results</span>
               </Link>
               <Link
-                to="/profile"
+                to="/my-analysis"
                 className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
               >
-                <User className="w-4 h-4" />
-                <span>Profile</span>
-              </Link>
-              <Link
-                to="/settings"
-                className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors"
-              >
-                <SettingsIcon className="w-4 h-4" />
-                <span>Settings</span>
+                <History className="w-4 h-4" />
+                <span>History</span>
               </Link>
             </div>
           </div>
@@ -87,13 +80,13 @@ const Navigation = () => {
               <DropdownMenuItem asChild>
                 <Link to="/profile" className="flex items-center">
                   <User className="w-4 h-4 mr-2" />
-                  Profile
+                  Profile & Settings
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link to="/settings" className="flex items-center">
-                  <SettingsIcon className="w-4 h-4 mr-2" />
-                  Settings
+                <Link to="/my-analysis" className="flex items-center">
+                  <History className="w-4 h-4 mr-2" />
+                  Analysis History
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -110,4 +103,3 @@ const Navigation = () => {
 };
 
 export default Navigation;
-

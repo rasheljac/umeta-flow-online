@@ -1,8 +1,10 @@
-import { FileText, Download, Eye, BarChart3, RotateCcw } from "lucide-react";
+
+import { FileText, Download, Eye, BarChart3, RotateCcw, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import ResultsPanel from "@/components/ResultsPanel";
 import DataVisualization from "@/components/DataVisualization";
+import ChromatogramExtraction from "@/components/ChromatogramExtraction";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState, useEffect } from "react";
 import { processingService } from "@/services/processingService";
@@ -244,7 +246,7 @@ const Results = () => {
         </div>
 
         <Tabs defaultValue="visualize" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 lg:w-fit">
+          <TabsList className="grid w-full grid-cols-3 lg:w-fit">
             <TabsTrigger value="results" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span>Results Summary</span>
@@ -252,6 +254,10 @@ const Results = () => {
             <TabsTrigger value="visualize" className="flex items-center space-x-2">
               <BarChart3 className="w-4 h-4" />
               <span>Data Visualization</span>
+            </TabsTrigger>
+            <TabsTrigger value="chromatogram" className="flex items-center space-x-2">
+              <Activity className="w-4 h-4" />
+              <span>Extract Chromatogram</span>
             </TabsTrigger>
           </TabsList>
 
@@ -282,6 +288,20 @@ const Results = () => {
                   results={results} 
                   uploadedDataOverride={uploadedData}
                 />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="chromatogram" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Activity className="w-5 h-5" />
+                  <span>Ion Chromatogram Extraction</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ChromatogramExtraction uploadedData={uploadedData} />
               </CardContent>
             </Card>
           </TabsContent>
