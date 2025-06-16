@@ -2,6 +2,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from './AuthProvider';
+import { useProfile } from '@/hooks/useProfile';
 import { Microscope, Upload, BarChart3, LogOut, User, History } from 'lucide-react';
 import {
   DropdownMenu,
@@ -13,6 +14,7 @@ import {
 
 const Navigation = () => {
   const { user, signOut } = useAuth();
+  const { profile } = useProfile();
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -21,6 +23,8 @@ const Navigation = () => {
   };
 
   if (!user) return null;
+
+  const displayName = profile?.full_name || user.email;
 
   return (
     <nav className="bg-white border-b border-slate-200 shadow-sm">
@@ -73,7 +77,7 @@ const Navigation = () => {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="flex items-center space-x-2">
                 <User className="w-4 h-4" />
-                <span className="hidden md:inline">{user.email}</span>
+                <span className="hidden md:inline">{displayName}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
