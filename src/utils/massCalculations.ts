@@ -7,19 +7,21 @@ export interface IonizationMode {
   polarity: 'positive' | 'negative';
 }
 
-// Common ionization modes for metabolomics
+// Comprehensive ionization modes for metabolomics with exact masses
 export const IONIZATION_MODES: IonizationMode[] = [
   { name: '[M+H]+', massShift: 1.007276, charge: 1, polarity: 'positive' },
   { name: '[M+Na]+', massShift: 22.989218, charge: 1, polarity: 'positive' },
   { name: '[M+K]+', massShift: 38.963158, charge: 1, polarity: 'positive' },
   { name: '[M+NH4]+', massShift: 18.033823, charge: 1, polarity: 'positive' },
+  { name: '[M+2H]2+', massShift: 2.014552, charge: 2, polarity: 'positive' },
   { name: '[M-H]-', massShift: -1.007276, charge: 1, polarity: 'negative' },
   { name: '[M+Cl]-', massShift: 34.969402, charge: 1, polarity: 'negative' },
   { name: '[M+HCOO]-', massShift: 44.998201, charge: 1, polarity: 'negative' },
-  { name: '[M+CH3COO]-', massShift: 59.013851, charge: 1, polarity: 'negative' }
+  { name: '[M+CH3COO]-', massShift: 59.013851, charge: 1, polarity: 'negative' },
+  { name: '[M-H2O-H]-', massShift: -19.01839, charge: 1, polarity: 'negative' }
 ];
 
-// Enhanced atomic masses with more elements
+// Enhanced atomic masses with high precision
 const ATOMIC_MASSES: { [key: string]: number } = {
   'C': 12.0000000, 'H': 1.0078250, 'O': 15.9949146, 'N': 14.0030740,
   'S': 31.9720718, 'P': 30.9737633, 'Cl': 34.9688527, 'Br': 78.9183376,
@@ -36,11 +38,12 @@ export const calculateExactMassFromFormula = (formula: string): number => {
   let mass = 0;
   
   try {
-    // Handle formulas with brackets
+    // Handle formulas with brackets - enhanced recursion
     let expandedFormula = cleanFormula;
     
     // Expand brackets (handles nested brackets recursively)
-    while (expandedFormula.includes('(')) {
+    let iterations = 0;
+    while (expandedFormula.includes('(') && iterations < 10) {
       expandedFormula = expandedFormula.replace(/\(([^()]+)\)(\d*)/g, (match, content, multiplier) => {
         const mult = parseInt(multiplier) || 1;
         let expanded = '';
@@ -54,9 +57,10 @@ export const calculateExactMassFromFormula = (formula: string): number => {
         }
         return expanded;
       });
+      iterations++;
     }
     
-    // Parse expanded formula
+    // Parse expanded formula with enhanced regex
     const regex = /([A-Z][a-z]?)(\d*)/g;
     let match;
     
@@ -69,6 +73,7 @@ export const calculateExactMassFromFormula = (formula: string): number => {
         mass += atomicMass * count;
       } else {
         console.warn(`Unknown element: ${element} in formula: ${formula}`);
+        // Don't fail completely - continue with known elements
       }
     }
     
@@ -84,7 +89,8 @@ export const calculateTheoreticalMZ = (
   ionizationMode: IonizationMode
 ): number => {
   if (exactMass === 0) return 0;
-  return (exactMass + ionizationMode.massShift) / Math.abs(ionizationMode.charge);
+  const mz = (exactMass + ionizationMode.massShift) / Math.abs(ionizationMode.charge);
+  return Math.round(mz * 1000000) / 1000000; // High precision
 };
 
 export const calculateAllTheoreticalMZ = (
@@ -98,7 +104,7 @@ export const calculateAllTheoreticalMZ = (
   return modes.map(mode => ({
     mode,
     mz: calculateTheoreticalMZ(exactMass, mode)
-  }));
+  })).filter(item => item.mz > 0); // Only return valid m/z values
 };
 
 export const findMassMatches = (
@@ -109,12 +115,14 @@ export const findMassMatches = (
   const matches = [];
   
   for (const theoretical of theoreticalMZList) {
+    if (theoretical.mz <= 0) continue; // Skip invalid m/z values
+    
     const ppmError = Math.abs((observedMZ - theoretical.mz) / theoretical.mz * 1000000);
     
     if (ppmError <= tolerancePPM) {
       matches.push({
         ...theoretical,
-        ppmError
+        ppmError: Math.round(ppmError * 100) / 100 // Round to 2 decimal places
       });
     }
   }

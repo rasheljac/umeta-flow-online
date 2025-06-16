@@ -55,7 +55,8 @@ export const detectPeaks = async (
   parameters: any
 ): Promise<any> => {
   try {
-    const { noise_threshold = 1000, min_peak_width = 3, max_peak_width = 50 } = parameters;
+    // Lower default threshold for better real data detection
+    const { noise_threshold = 500, min_peak_width = 3, max_peak_width = 50 } = parameters;
     
     console.log(`Detecting peaks with threshold: ${noise_threshold}`);
     console.log(`Input data structure:`, data.map(d => ({ 
@@ -98,7 +99,7 @@ export const detectPeaks = async (
         }
 
         try {
-          // Use real peaks from the spectrum
+          // Use real peaks from the spectrum with lower threshold
           const validPeaks = spectrum.peaks.filter(peak => 
             peak && 
             typeof peak.mz === 'number' && 
@@ -117,7 +118,7 @@ export const detectPeaks = async (
             intensity: peak.intensity,
             retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
             area: calculatePeakArea(peak, spectrum.peaks),
-            snRatio: peak.intensity / noise_threshold
+            snRatio: peak.intensity / Math.max(noise_threshold, 1)
           }));
           
           allPeaks.push(...processedPeaks);
@@ -413,21 +414,23 @@ export const identifyCompounds = async (
   data: any[], 
   parameters: any
 ): Promise<any> => {
-  const { database = 'HMDB', mass_tolerance = 0.01, ms2DbContent = null } = parameters;
+  // Enhanced tolerance - support both ppm and Da
+  const { database = 'HMDB', mass_tolerance = 10, tolerance_unit = 'ppm' } = parameters;
   
-  console.log(`Starting compound identification using ${database} database with tolerance ${mass_tolerance} Da`);
+  console.log(`Starting compound identification using ${database} database with tolerance ${mass_tolerance} ${tolerance_unit}`);
   
   await new Promise(resolve => setTimeout(resolve, 300));
   
   const identifiedCompounds: IdentifiedCompound[] = [];
   
-  // Get uploaded compound list from localStorage
+  // Enhanced compound loading from localStorage with fallback
   let uploadedCompounds: any[] = [];
   try {
     const storedCompoundList = localStorage.getItem('compoundListData');
     if (storedCompoundList) {
-      uploadedCompounds = JSON.parse(storedCompoundList);
-      console.log(`Using uploaded compound list with ${uploadedCompounds.length} compounds`);
+      const parsed = JSON.parse(storedCompoundList);
+      uploadedCompounds = Array.isArray(parsed) ? parsed : [];
+      console.log(`Loaded uploaded compound list with ${uploadedCompounds.length} compounds`);
       console.log('Sample uploaded compounds:', uploadedCompounds.slice(0, 3));
     }
   } catch (error) {
@@ -437,21 +440,26 @@ export const identifyCompounds = async (
   // Use uploaded compounds if available, otherwise fall back to built-in database
   const compoundsToSearch = uploadedCompounds.length > 0 ? uploadedCompounds : COMPOUND_DATABASE;
   
-  console.log(`Searching against ${compoundsToSearch.length} compounds`);
+  console.log(`Searching against ${compoundsToSearch.length} compounds from ${uploadedCompounds.length > 0 ? 'uploaded CSV' : 'built-in database'}`);
   
-  // Pre-calculate theoretical m/z values for all compounds
+  // Pre-calculate theoretical m/z values for all compounds with enhanced calculation
   const compoundMZDatabase = compoundsToSearch.map(compound => {
-    const exactMass = compound.mass || calculateExactMassFromFormula(compound.formula);
-    const theoreticalMZs = calculateAllTheoreticalMZ(exactMass);
+    const exactMass = compound.mass || compound.exactMass || calculateExactMassFromFormula(compound.formula || compound.Formula);
     
-    return {
-      ...compound,
-      exactMass,
-      theoreticalMZs
-    };
-  }).filter(compound => compound.exactMass > 0);
+    if (exactMass && exactMass > 0) {
+      const theoreticalMZs = calculateAllTheoreticalMZ(exactMass);
+      
+      return {
+        ...compound,
+        exactMass,
+        theoreticalMZs,
+        name: compound.name || compound.compound || compound.Compound || 'Unknown'
+      };
+    }
+    return null;
+  }).filter(compound => compound !== null && compound.exactMass > 0);
   
-  console.log(`Pre-calculated m/z values for ${compoundMZDatabase.length} compounds`);
+  console.log(`Pre-calculated m/z values for ${compoundMZDatabase.length} valid compounds`);
   
   let totalPeaksProcessed = 0;
   let matchesFound = 0;
@@ -467,30 +475,41 @@ export const identifyCompounds = async (
         return;
       }
 
-      // Convert mass tolerance from Da to ppm if needed (more robust tolerance handling)
-      const tolerancePPM = mass_tolerance < 1 ? (mass_tolerance / peak.mz * 1000000) : mass_tolerance;
+      // Enhanced tolerance calculation - support both ppm and Da
+      let tolerancePPM: number;
+      if (tolerance_unit === 'ppm') {
+        tolerancePPM = mass_tolerance;
+      } else {
+        // Convert Da to ppm: ppm = (tolerance_Da / observed_mz) * 1e6
+        tolerancePPM = (mass_tolerance / peak.mz) * 1000000;
+      }
       
-      // Find matching compounds
+      // Find matching compounds with enhanced matching
       compoundMZDatabase.forEach(compound => {
+        if (!compound || !compound.theoreticalMZs) return;
+        
         const matches = findMassMatches(peak.mz, compound.theoreticalMZs, tolerancePPM);
         
         matches.forEach(match => {
-          const compoundName = compound.compound || compound.name;
+          const compoundName = compound.name;
           const matchScore = Math.max(0, 1 - (match.ppmError / tolerancePPM));
           
-          console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name} (theoretical: ${match.mz.toFixed(4)}, error: ${match.ppmError.toFixed(2)} ppm, score: ${matchScore.toFixed(3)})`);
-          
-          identifiedCompounds.push({
-            id: `${compoundName}_${match.mode.name}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
-            name: `${compoundName} (${match.mode.name})`,
-            formula: compound.formula,
-            mass: compound.exactMass,
-            matchScore,
-            database: uploadedCompounds.length > 0 ? 'Uploaded CSV' : database,
-            peaks: [{ ...peak, ionizationMode: match.mode.name, ppmError: match.ppmError }]
-          });
-          
-          matchesFound++;
+          // Only accept matches with reasonable scores
+          if (matchScore > 0.1) { // At least 10% match quality
+            console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name} (theoretical: ${match.mz.toFixed(4)}, error: ${match.ppmError.toFixed(2)} ppm, score: ${matchScore.toFixed(3)})`);
+            
+            identifiedCompounds.push({
+              id: `${compoundName}_${match.mode.name}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
+              name: `${compoundName} (${match.mode.name})`,
+              formula: compound.formula || compound.Formula || 'Unknown',
+              mass: compound.exactMass,
+              matchScore,
+              database: uploadedCompounds.length > 0 ? 'Uploaded CSV' : database,
+              peaks: [{ ...peak, ionizationMode: match.mode.name, ppmError: match.ppmError }]
+            });
+            
+            matchesFound++;
+          }
         });
       });
     });
@@ -509,7 +528,7 @@ export const identifyCompounds = async (
       identifiedCompounds: identifiedCompounds.filter(c => c.id.includes(sample.fileName || `_${index}_`))
     })),
     compoundsIdentified: identifiedCompounds.length,
-    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} using ionization mode matching (processed ${totalPeaksProcessed} peaks, tolerance: ${mass_tolerance} Da/ppm)`
+    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} using ${tolerance_unit} tolerance (${mass_tolerance} ${tolerance_unit}, processed ${totalPeaksProcessed} peaks)`
   };
 };
 
