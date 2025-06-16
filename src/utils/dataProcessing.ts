@@ -1,4 +1,10 @@
 import { ParsedMzData, Spectrum } from './mzParser';
+import { 
+  calculateExactMassFromFormula, 
+  calculateAllTheoreticalMZ, 
+  findMassMatches,
+  IONIZATION_MODES
+} from './massCalculations';
 
 export interface Peak {
   mz: number;
@@ -434,6 +440,20 @@ export const identifyCompounds = async (
   console.log(`Searching against ${compoundsToSearch.length} compounds`);
   console.log('Sample compound structures:', compoundsToSearch.slice(0, 2));
   
+  // Pre-calculate theoretical m/z values for all compounds
+  const compoundMZDatabase = compoundsToSearch.map(compound => {
+    const exactMass = compound.mass || calculateExactMassFromFormula(compound.formula);
+    const theoreticalMZs = calculateAllTheoreticalMZ(exactMass);
+    
+    return {
+      ...compound,
+      exactMass,
+      theoreticalMZs
+    };
+  }).filter(compound => compound.exactMass > 0);
+  
+  console.log(`Pre-calculated m/z values for ${compoundMZDatabase.length} compounds`);
+  
   let totalPeaksProcessed = 0;
   let matchesFound = 0;
   
@@ -444,44 +464,35 @@ export const identifyCompounds = async (
     totalPeaksProcessed += peaks.length;
     
     peaks.forEach((peak: Peak, peakIndex: number) => {
-      // Find matching compounds within mass tolerance
-      const matches = compoundsToSearch.filter(compound => {
-        // Handle both uploaded CSV format and built-in database format
-        const compoundMass = compound.mass || calculateMassFromFormula(compound.formula);
-        
-        if (!compoundMass || compoundMass === 0) {
-          return false;
-        }
-        
-        const massDiff = Math.abs(peak.mz - compoundMass);
-        const withinTolerance = massDiff <= mass_tolerance;
-        
-        if (withinTolerance) {
-          console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compound.compound || compound.name} (${compoundMass.toFixed(4)} Da, diff: ${massDiff.toFixed(4)} Da)`);
-        }
-        
-        return withinTolerance;
-      });
+      if (!peak || typeof peak.mz !== 'number' || peak.mz <= 0) {
+        return;
+      }
+
+      // Convert mass tolerance from Da to ppm if needed
+      const tolerancePPM = mass_tolerance < 1 ? (mass_tolerance / peak.mz * 1000000) : mass_tolerance;
       
-      matches.forEach(compound => {
-        const compoundMass = compound.mass || calculateMassFromFormula(compound.formula);
-        const massDiff = Math.abs(peak.mz - compoundMass);
-        const matchScore = Math.max(0, 1 - (massDiff / mass_tolerance));
+      // Find matching compounds
+      compoundMZDatabase.forEach(compound => {
+        const matches = findMassMatches(peak.mz, compound.theoreticalMZs, tolerancePPM);
         
-        // Handle both CSV format (compound field) and built-in format (name field)
-        const compoundName = compound.compound || compound.name;
-        
-        identifiedCompounds.push({
-          id: `${compoundName}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
-          name: compoundName,
-          formula: compound.formula,
-          mass: compoundMass,
-          matchScore,
-          database: uploadedCompounds.length > 0 ? 'Uploaded CSV' : database,
-          peaks: [peak]
+        matches.forEach(match => {
+          const compoundName = compound.compound || compound.name;
+          const matchScore = Math.max(0, 1 - (match.ppmError / tolerancePPM));
+          
+          console.log(`Match found: Peak m/z ${peak.mz.toFixed(4)} matches ${compoundName} as ${match.mode.name} (theoretical: ${match.mz.toFixed(4)}, error: ${match.ppmError.toFixed(2)} ppm)`);
+          
+          identifiedCompounds.push({
+            id: `${compoundName}_${match.mode.name}_${peak.mz.toFixed(4)}_${sample.fileName}_${peakIndex}`,
+            name: `${compoundName} (${match.mode.name})`,
+            formula: compound.formula,
+            mass: compound.exactMass,
+            matchScore,
+            database: uploadedCompounds.length > 0 ? 'Uploaded CSV' : database,
+            peaks: [{ ...peak, ionizationMode: match.mode.name, ppmError: match.ppmError }]
+          });
+          
+          matchesFound++;
         });
-        
-        matchesFound++;
       });
     });
   });
@@ -499,7 +510,7 @@ export const identifyCompounds = async (
       identifiedCompounds: identifiedCompounds.filter(c => c.id.includes(sample.fileName || `_${index}_`))
     })),
     compoundsIdentified: identifiedCompounds.length,
-    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} within ${mass_tolerance} Da tolerance (processed ${totalPeaksProcessed} peaks)`
+    message: `Identified ${identifiedCompounds.length} compounds from ${sourceInfo} with ionization modes (processed ${totalPeaksProcessed} peaks, tolerance: ${mass_tolerance} Da/ppm)`
   };
 };
 

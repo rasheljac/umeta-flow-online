@@ -60,6 +60,8 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
 
       // Extract chromatogram from uploaded data
       const chromatogramData: any[] = [];
+      let totalSpectraProcessed = 0;
+      let totalPeaksFound = 0;
 
       uploadedData.forEach((sample, sampleIndex) => {
         console.log(`Processing sample ${sampleIndex}: ${sample.fileName || 'Unknown'}`);
@@ -80,6 +82,8 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
         console.log(`Sample ${sample.fileName}: processing ${spectraArray.length} spectra`);
 
         spectraArray.forEach((spectrum: any, spectrumIndex: number) => {
+          totalSpectraProcessed++;
+          
           // Validate spectrum structure
           if (!spectrum || typeof spectrum !== 'object') {
             console.warn(`Invalid spectrum at index ${spectrumIndex} in ${sample.fileName}`);
@@ -106,9 +110,10 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
             return;
           }
 
-          // Find peaks within m/z tolerance
+          // Find peaks within m/z tolerance with enhanced matching
           let totalIntensity = 0;
           let peaksInRange = 0;
+          let bestPeakIntensity = 0;
           
           peaks.forEach((peak: any) => {
             // Handle different peak structures
@@ -131,20 +136,33 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
               return; // Skip invalid peak data
             }
             
-            const mzDiff = Math.abs(peakMz - mzTarget);
-            if (mzDiff <= tolerance) {
+            // Enhanced m/z matching with both absolute and ppm tolerance
+            const mzDiffAbs = Math.abs(peakMz - mzTarget);
+            const mzDiffPpm = (mzDiffAbs / mzTarget) * 1000000;
+            
+            // Use absolute tolerance if < 1, otherwise treat as ppm
+            const toleranceMatches = tolerance < 1 
+              ? mzDiffAbs <= tolerance 
+              : mzDiffPpm <= tolerance;
+            
+            if (toleranceMatches) {
               totalIntensity += peakIntensity;
               peaksInRange++;
+              bestPeakIntensity = Math.max(bestPeakIntensity, peakIntensity);
+              totalPeaksFound++;
             }
           });
 
+          // Only add data points with significant intensity
           if (totalIntensity > 0) {
             chromatogramData.push({
               retentionTime: retentionTime,
               intensity: totalIntensity,
               sample: sample.fileName || `Sample ${sampleIndex + 1}`,
               sampleIndex,
-              peaksInRange
+              peaksInRange,
+              bestPeakIntensity,
+              spectrumIndex
             });
           }
         });
@@ -153,21 +171,24 @@ const ChromatogramExtraction = ({ uploadedData }: ChromatogramExtractionProps) =
       // Sort by retention time
       chromatogramData.sort((a, b) => a.retentionTime - b.retentionTime);
       
-      console.log(`Extraction complete: ${chromatogramData.length} data points found`);
+      console.log(`Extraction complete: ${chromatogramData.length} data points found from ${totalSpectraProcessed} spectra`);
+      console.log(`Total peaks found in range: ${totalPeaksFound}`);
       console.log('Sample data points:', chromatogramData.slice(0, 5));
       
       setExtractedData(chromatogramData);
       
       if (chromatogramData.length === 0) {
+        const toleranceType = tolerance < 1 ? 'Da' : 'ppm';
         toast({
           title: "No data found",
-          description: `No peaks found for m/z ${mzTarget} within tolerance ${tolerance} Da. Try increasing the tolerance or checking your m/z value.`,
+          description: `No peaks found for m/z ${mzTarget} within tolerance ${tolerance} ${toleranceType}. Processed ${totalSpectraProcessed} spectra. Try increasing the tolerance or checking your m/z value.`,
           variant: "destructive"
         });
       } else {
+        const toleranceType = tolerance < 1 ? 'Da' : 'ppm';
         toast({
           title: "Extraction complete",
-          description: `Found ${chromatogramData.length} data points for m/z ${mzTarget} (total intensity from ${chromatogramData.reduce((sum, d) => sum + d.peaksInRange, 0)} peaks)`
+          description: `Found ${chromatogramData.length} data points for m/z ${mzTarget} ± ${tolerance} ${toleranceType} (from ${totalPeaksFound} matching peaks across ${totalSpectraProcessed} spectra)`
         });
       }
     } catch (error) {

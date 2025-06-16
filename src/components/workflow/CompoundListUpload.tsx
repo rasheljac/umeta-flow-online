@@ -1,86 +1,14 @@
-
 import { useState, ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileText, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { calculateExactMassFromFormula } from '@/utils/massCalculations';
 
 interface CompoundListUploadProps {
   hasFiles: boolean;
 }
-
-// Enhanced molecular mass calculation function
-const calculateMassFromFormula = (formula: string): number => {
-  if (!formula || typeof formula !== 'string') return 0;
-  
-  // Remove spaces and normalize formula
-  const cleanFormula = formula.replace(/\s+/g, '');
-  
-  // Enhanced atomic masses with more elements
-  const atomicMasses: { [key: string]: number } = {
-    'C': 12.011, 'H': 1.008, 'O': 15.999, 'N': 14.007, 
-    'S': 32.066, 'P': 30.974, 'Cl': 35.453, 'Br': 79.904,
-    'F': 18.998, 'I': 126.904, 'Na': 22.990, 'K': 39.098,
-    'Ca': 40.078, 'Mg': 24.305, 'Fe': 55.845, 'Zn': 65.380,
-    'Cu': 63.546, 'Mn': 54.938, 'Mo': 95.960, 'Se': 78.960,
-    'Si': 28.085, 'B': 10.811, 'Al': 26.982
-  };
-  
-  let mass = 0;
-  // Enhanced regex to handle more complex formulas including brackets
-  const regex = /([A-Z][a-z]?)(\d*)/g;
-  let match;
-  
-  // Handle simple formulas without brackets first
-  if (!cleanFormula.includes('(')) {
-    while ((match = regex.exec(cleanFormula)) !== null) {
-      const element = match[1];
-      const count = parseInt(match[2]) || 1;
-      const atomicMass = atomicMasses[element];
-      
-      if (atomicMass) {
-        mass += atomicMass * count;
-      } else {
-        console.warn(`Unknown element: ${element} in formula: ${formula}`);
-      }
-    }
-  } else {
-    // Handle formulas with brackets (basic implementation)
-    // This is a simplified version - for production, use a proper chemistry library
-    let expandedFormula = cleanFormula;
-    
-    // Simple bracket expansion (handles one level of nesting)
-    const bracketRegex = /\(([^)]+)\)(\d*)/g;
-    expandedFormula = expandedFormula.replace(bracketRegex, (match, content, multiplier) => {
-      const mult = parseInt(multiplier) || 1;
-      let expanded = '';
-      const contentRegex = /([A-Z][a-z]?)(\d*)/g;
-      let contentMatch;
-      
-      while ((contentMatch = contentRegex.exec(content)) !== null) {
-        const element = contentMatch[1];
-        const count = (parseInt(contentMatch[2]) || 1) * mult;
-        expanded += element + (count > 1 ? count : '');
-      }
-      return expanded;
-    });
-    
-    // Now calculate mass from expanded formula
-    regex.lastIndex = 0;
-    while ((match = regex.exec(expandedFormula)) !== null) {
-      const element = match[1];
-      const count = parseInt(match[2]) || 1;
-      const atomicMass = atomicMasses[element];
-      
-      if (atomicMass) {
-        mass += atomicMass * count;
-      }
-    }
-  }
-  
-  return Math.round(mass * 10000) / 10000; // Round to 4 decimal places
-};
 
 const CompoundListUpload = ({ hasFiles }: CompoundListUploadProps) => {
   const [compoundListFile, setCompoundListFile] = useState<File | null>(null);
@@ -125,8 +53,8 @@ const CompoundListUpload = ({ hasFiles }: CompoundListUploadProps) => {
           const values = line.split(',').map(v => v.trim());
           const entry: any = {};
           
-          headers.forEach((header, index) => {
-            const value = values[index] || '';
+          headers.forEach((header, headerIndex) => {
+            const value = values[headerIndex] || '';
             if (header.includes('compound') || header.includes('name')) {
               entry.compound = value;
               entry.name = value; // Support both field names
@@ -143,9 +71,9 @@ const CompoundListUpload = ({ hasFiles }: CompoundListUploadProps) => {
             }
           });
           
-          // Calculate mass from formula if not provided
+          // Calculate mass from formula if not provided using enhanced function
           if (!entry.mass && entry.formula) {
-            entry.mass = calculateMassFromFormula(entry.formula);
+            entry.mass = calculateExactMassFromFormula(entry.formula);
             console.log(`Calculated mass for ${entry.compound}: ${entry.mass} from formula: ${entry.formula}`);
           }
           
@@ -160,7 +88,7 @@ const CompoundListUpload = ({ hasFiles }: CompoundListUploadProps) => {
         
         toast({
           title: "Compound list uploaded",
-          description: `Successfully loaded ${data.length} compounds with calculated masses for MS1 identification`,
+          description: `Successfully loaded ${data.length} compounds with calculated exact masses for MS1 identification`,
         });
         
       } catch (error) {
