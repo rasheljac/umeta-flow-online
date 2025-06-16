@@ -1,3 +1,4 @@
+
 import { ParsedMzData, Spectrum } from './mzParser';
 import { 
   calculateExactMassFromFormula, 
@@ -12,6 +13,8 @@ export interface Peak {
   retentionTime: number;
   area?: number;
   snRatio?: number;
+  ionizationMode?: string;
+  ppmError?: number;
 }
 
 export interface AlignedPeak extends Peak {

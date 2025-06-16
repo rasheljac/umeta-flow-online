@@ -1,3 +1,5 @@
+import { parseBinaryData, extractPeaksFromBinaryArrays } from './binaryDataParser';
+
 export interface Peak {
   mz: number;
   intensity: number;
