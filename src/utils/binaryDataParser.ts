@@ -1,206 +1,223 @@
 
-// Binary data parsing utilities for mzML/mzXML files
-export interface BinaryDataArray {
-  data: number[];
-  precision: 32 | 64;
-  compression: 'none' | 'zlib' | 'gzip';
-  arrayType: 'mz' | 'intensity' | 'time';
+export interface BinaryDataParser {
+  parseFloat32Array: (base64Data: string, compression?: string) => Float32Array;
+  parseFloat64Array: (base64Data: string, compression?: string) => Float64Array;
+  parseInt32Array: (base64Data: string, compression?: string) => Int32Array;
 }
 
-export const parseBinaryData = (
-  binaryElement: Element,
-  arrayLength: number
-): BinaryDataArray => {
-  // Get binary data attributes with better detection
-  const precisionParam = binaryElement.querySelector('cvParam[name*="32-bit"], cvParam[name*="64-bit"]');
-  const precision = precisionParam?.getAttribute('name')?.includes('64') ? 64 : 32;
-  
-  const compressionParam = binaryElement.querySelector('cvParam[name*="zlib"], cvParam[name*="compression"], cvParam[name*="no compression"]');
-  const compression = compressionParam?.getAttribute('name')?.includes('zlib') ? 'zlib' : 'none';
-  
-  // Better array type detection
-  const arrayTypeParam = binaryElement.querySelector('cvParam[name*="m/z"], cvParam[name*="intensity"], cvParam[name*="time"]');
-  let arrayType: 'mz' | 'intensity' | 'time' = 'mz';
-  if (arrayTypeParam) {
-    const paramName = arrayTypeParam.getAttribute('name') || '';
-    if (paramName.toLowerCase().includes('intensity')) arrayType = 'intensity';
-    else if (paramName.toLowerCase().includes('time')) arrayType = 'time';
-  }
-
-  // Get base64 encoded data
-  const binaryText = binaryElement.querySelector('binary')?.textContent?.trim();
-  if (!binaryText) {
-    console.warn('No binary data found in element');
-    return { data: [], precision, compression, arrayType };
-  }
-
-  try {
-    // Enhanced base64 decoding with validation
-    let binaryString: string;
+// Enhanced binary data parsing with better error handling and debugging
+export const binaryDataParser: BinaryDataParser = {
+  parseFloat32Array: (base64Data: string, compression?: string): Float32Array => {
     try {
-      // Clean base64 string - remove whitespace and newlines
-      const cleanBase64 = binaryText.replace(/\s/g, '');
-      binaryString = atob(cleanBase64);
+      console.log(`🔍 Parsing Float32Array: ${base64Data.length} chars, compression: ${compression || 'none'}`);
+      
+      if (!base64Data || typeof base64Data !== 'string') {
+        console.warn('⚠️ Invalid base64 data provided');
+        return new Float32Array();
+      }
+
+      // Clean base64 data
+      const cleanedData = base64Data.replace(/\s/g, '');
+      
+      // Decode base64
+      let binaryString: string;
+      try {
+        binaryString = atob(cleanedData);
+      } catch (error) {
+        console.error('❌ Base64 decode failed:', error);
+        return new Float32Array();
+      }
+
+      console.log(`📊 Decoded binary string length: ${binaryString.length} bytes`);
+
+      // Handle compression if specified
+      let finalBinaryString = binaryString;
+      if (compression && compression.toLowerCase() === 'zlib') {
+        console.log('⚠️ zlib compression detected but not implemented, using raw data');
+        // Note: Real zlib decompression would require additional libraries
+      }
+
+      // Convert to array buffer
+      const arrayBuffer = new ArrayBuffer(finalBinaryString.length);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      for (let i = 0; i < finalBinaryString.length; i++) {
+        uint8Array[i] = finalBinaryString.charCodeAt(i);
+      }
+
+      const float32Array = new Float32Array(arrayBuffer);
+      
+      console.log(`✅ Parsed ${float32Array.length} float32 values`);
+      console.log(`📈 Value range: ${Math.min(...float32Array).toFixed(4)} - ${Math.max(...float32Array).toFixed(4)}`);
+      
+      // Log some sample values for debugging
+      if (float32Array.length > 0) {
+        const sampleValues = Array.from(float32Array.slice(0, 10));
+        console.log(`📝 Sample values:`, sampleValues.map(v => v.toFixed(4)).join(', '));
+      }
+
+      return float32Array;
     } catch (error) {
-      console.error('Failed to decode base64 data:', error);
-      return { data: [], precision, compression, arrayType };
+      console.error('❌ Error parsing Float32Array:', error);
+      return new Float32Array();
     }
+  },
 
-    // Convert to Uint8Array more efficiently
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    // Handle compression - basic implementation
-    let decodedBytes = bytes;
-    if (compression === 'zlib') {
-      console.warn('Zlib compression detected. Attempting to parse raw data.');
-      // For now, try to parse anyway - in production, would need pako or similar library
-    }
-
-    // Enhanced number conversion with better validation
-    const data: number[] = [];
-    const bytesPerFloat = precision === 64 ? 8 : 4;
-    const expectedBytes = arrayLength * bytesPerFloat;
-    
-    console.log(`Parsing binary array: type=${arrayType}, length=${arrayLength}, precision=${precision}, compression=${compression}`);
-    console.log(`Expected ${expectedBytes} bytes, got ${decodedBytes.length} bytes`);
-    
-    if (decodedBytes.length >= expectedBytes) {
-      const dataView = new DataView(decodedBytes.buffer, decodedBytes.byteOffset);
+  parseFloat64Array: (base64Data: string, compression?: string): Float64Array => {
+    try {
+      console.log(`🔍 Parsing Float64Array: ${base64Data.length} chars, compression: ${compression || 'none'}`);
       
-      for (let i = 0; i < arrayLength; i++) {
-        const offset = i * bytesPerFloat;
-        try {
-          let value: number;
-          
-          // Try both little and big endian - mzML typically uses little, mzXML uses big
-          if (precision === 64) {
-            value = dataView.getFloat64(offset, true); // little endian first
-            // If value seems invalid, try big endian
-            if (!isFinite(value) || (arrayType === 'mz' && (value < 0 || value > 10000))) {
-              value = dataView.getFloat64(offset, false); // big endian
-            }
-          } else {
-            value = dataView.getFloat32(offset, true); // little endian first
-            // If value seems invalid, try big endian
-            if (!isFinite(value) || (arrayType === 'mz' && (value < 0 || value > 10000))) {
-              value = dataView.getFloat32(offset, false); // big endian
-            }
-          }
-          
-          // Enhanced validation based on array type
-          if (isFinite(value) && !isNaN(value)) {
-            if (arrayType === 'mz' && value > 0 && value < 10000) {
-              data.push(value);
-            } else if (arrayType === 'intensity' && value >= 0) {
-              data.push(value);
-            } else if (arrayType === 'time' && value >= 0) {
-              data.push(value);
-            } else if (arrayType === 'mz') {
-              // Still add even if outside normal range - might be valid
-              data.push(Math.abs(value));
-            } else {
-              data.push(Math.abs(value)); // Take absolute value as fallback
-            }
-          } else {
-            console.warn(`Invalid value at index ${i}: ${value} for type ${arrayType}`);
-          }
-        } catch (error) {
-          console.warn(`Error reading value at offset ${offset}:`, error);
-          break;
-        }
+      if (!base64Data || typeof base64Data !== 'string') {
+        console.warn('⚠️ Invalid base64 data provided');
+        return new Float64Array();
       }
-      
-      console.log(`Successfully parsed ${data.length} values from binary data (${arrayType})`);
-      
-      // Additional validation - check if data makes sense
-      if (data.length > 0) {
-        if (arrayType === 'mz') {
-          const avgMz = data.reduce((sum, val) => sum + val, 0) / data.length;
-          console.log(`Average m/z: ${avgMz.toFixed(2)}, range: ${Math.min(...data).toFixed(2)} - ${Math.max(...data).toFixed(2)}`);
-        } else if (arrayType === 'intensity') {
-          const maxIntensity = Math.max(...data);
-          const nonZeroCount = data.filter(v => v > 0).length;
-          console.log(`Max intensity: ${maxIntensity.toLocaleString()}, non-zero values: ${nonZeroCount}/${data.length}`);
-        }
-      }
-      
-    } else {
-      console.warn(`Binary data length mismatch: expected ${expectedBytes} bytes, got ${decodedBytes.length}`);
-      return { data: [], precision, compression, arrayType };
-    }
 
-    return { data, precision, compression, arrayType };
-  } catch (error) {
-    console.error('Failed to parse binary data:', error);
-    return { data: [], precision, compression, arrayType };
+      // Clean base64 data
+      const cleanedData = base64Data.replace(/\s/g, '');
+      
+      // Decode base64
+      let binaryString: string;
+      try {
+        binaryString = atob(cleanedData);
+      } catch (error) {
+        console.error('❌ Base64 decode failed:', error);
+        return new Float64Array();
+      }
+
+      console.log(`📊 Decoded binary string length: ${binaryString.length} bytes`);
+
+      // Handle compression if specified
+      let finalBinaryString = binaryString;
+      if (compression && compression.toLowerCase() === 'zlib') {
+        console.log('⚠️ zlib compression detected but not implemented, using raw data');
+      }
+
+      // Convert to array buffer
+      const arrayBuffer = new ArrayBuffer(finalBinaryString.length);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      for (let i = 0; i < finalBinaryString.length; i++) {
+        uint8Array[i] = finalBinaryString.charCodeAt(i);
+      }
+
+      const float64Array = new Float64Array(arrayBuffer);
+      
+      console.log(`✅ Parsed ${float64Array.length} float64 values`);
+      console.log(`📈 Value range: ${Math.min(...float64Array).toFixed(4)} - ${Math.max(...float64Array).toFixed(4)}`);
+      
+      // Log some sample values for debugging
+      if (float64Array.length > 0) {
+        const sampleValues = Array.from(float64Array.slice(0, 10));
+        console.log(`📝 Sample values:`, sampleValues.map(v => v.toFixed(4)).join(', '));
+      }
+
+      return float64Array;
+    } catch (error) {
+      console.error('❌ Error parsing Float64Array:', error);
+      return new Float64Array();
+    }
+  },
+
+  parseInt32Array: (base64Data: string, compression?: string): Int32Array => {
+    try {
+      console.log(`🔍 Parsing Int32Array: ${base64Data.length} chars, compression: ${compression || 'none'}`);
+      
+      if (!base64Data || typeof base64Data !== 'string') {
+        console.warn('⚠️ Invalid base64 data provided');
+        return new Int32Array();
+      }
+
+      // Clean base64 data
+      const cleanedData = base64Data.replace(/\s/g, '');
+      
+      // Decode base64
+      let binaryString: string;
+      try {
+        binaryString = atob(cleanedData);
+      } catch (error) {
+        console.error('❌ Base64 decode failed:', error);
+        return new Int32Array();
+      }
+
+      console.log(`📊 Decoded binary string length: ${binaryString.length} bytes`);
+
+      // Handle compression if specified
+      let finalBinaryString = binaryString;
+      if (compression && compression.toLowerCase() === 'zlib') {
+        console.log('⚠️ zlib compression detected but not implemented, using raw data');
+      }
+
+      // Convert to array buffer
+      const arrayBuffer = new ArrayBuffer(finalBinaryString.length);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      
+      for (let i = 0; i < finalBinaryString.length; i++) {
+        uint8Array[i] = finalBinaryString.charCodeAt(i);
+      }
+
+      const int32Array = new Int32Array(arrayBuffer);
+      
+      console.log(`✅ Parsed ${int32Array.length} int32 values`);
+      
+      if (int32Array.length > 0) {
+        console.log(`📈 Value range: ${Math.min(...int32Array)} - ${Math.max(...int32Array)}`);
+        
+        // Log some sample values for debugging
+        const sampleValues = Array.from(int32Array.slice(0, 10));
+        console.log(`📝 Sample values:`, sampleValues.join(', '));
+      }
+
+      return int32Array;
+    } catch (error) {
+      console.error('❌ Error parsing Int32Array:', error);
+      return new Int32Array();
+    }
   }
 };
 
-export const extractPeaksFromBinaryArrays = (
-  mzArray: number[],
-  intensityArray: number[]
-): { mz: number; intensity: number }[] => {
-  const peaks = [];
-  const length = Math.min(mzArray.length, intensityArray.length);
+// Enhanced helper functions for debugging
+export const validateBinaryData = (data: any[]): boolean => {
+  console.log(`🔍 Validating binary data arrays...`);
   
-  console.log(`Extracting peaks from arrays: ${mzArray.length} m/z values, ${intensityArray.length} intensity values`);
-  
-  for (let i = 0; i < length; i++) {
-    const mz = mzArray[i];
-    const intensity = intensityArray[i];
-    
-    // Only include valid, non-zero intensities
-    if (intensity > 0 && !isNaN(mz) && !isNaN(intensity) && isFinite(mz) && isFinite(intensity)) {
-      peaks.push({
-        mz: mz,
-        intensity: intensity
-      });
-    }
-  }
-  
-  console.log(`Extracted ${peaks.length} valid peaks`);
-  return peaks;
-};
-
-// Helper function to validate peak data structure
-export const validatePeakData = (peaks: any[]): boolean => {
-  if (!Array.isArray(peaks) || peaks.length === 0) {
+  if (!Array.isArray(data)) {
+    console.error('❌ Data is not an array');
     return false;
   }
-  
-  // Check if peaks have the expected structure
-  return peaks.every(peak => 
-    peak && 
-    typeof peak === 'object' && 
-    typeof peak.mz === 'number' && 
-    typeof peak.intensity === 'number' && 
-    !isNaN(peak.mz) && 
-    !isNaN(peak.intensity) &&
-    isFinite(peak.mz) && 
-    isFinite(peak.intensity) &&
-    peak.intensity > 0
-  );
+
+  let totalValidValues = 0;
+  let totalArrays = 0;
+
+  for (const array of data) {
+    totalArrays++;
+    if (array && typeof array.length === 'number' && array.length > 0) {
+      // Check if it's a typed array
+      if (array instanceof Float32Array || array instanceof Float64Array || array instanceof Int32Array) {
+        totalValidValues += array.length;
+        console.log(`✅ Valid ${array.constructor.name} with ${array.length} values`);
+      } else {
+        console.warn(`⚠️ Array ${totalArrays} is not a typed array`);
+      }
+    } else {
+      console.warn(`⚠️ Array ${totalArrays} is empty or invalid`);
+    }
+  }
+
+  console.log(`📊 Validation summary: ${totalValidValues} valid values from ${totalArrays} arrays`);
+  return totalValidValues > 0;
 };
 
-// Helper function to validate and filter peak arrays
-export const filterValidPeaks = (peaks: any[]): { mz: number; intensity: number }[] => {
-  if (!Array.isArray(peaks)) {
-    return [];
-  }
+export const debugBinaryParsing = (base64String: string, expectedType: string): void => {
+  console.log(`🔬 Debug binary parsing for ${expectedType}:`);
+  console.log(`   Base64 length: ${base64String.length}`);
+  console.log(`   First 50 chars: ${base64String.substring(0, 50)}...`);
+  console.log(`   Last 50 chars: ...${base64String.substring(base64String.length - 50)}`);
   
-  return peaks.filter(peak => 
-    peak && 
-    typeof peak === 'object' && 
-    typeof peak.mz === 'number' && 
-    typeof peak.intensity === 'number' && 
-    !isNaN(peak.mz) && 
-    !isNaN(peak.intensity) &&
-    isFinite(peak.mz) && 
-    isFinite(peak.intensity) &&
-    peak.intensity > 0 &&
-    peak.mz > 0
-  );
+  // Check for valid base64 characters
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  const isValidBase64 = base64Regex.test(base64String.replace(/\s/g, ''));
+  console.log(`   Valid base64 format: ${isValidBase64}`);
+  
+  if (!isValidBase64) {
+    console.error('❌ Invalid base64 characters detected');
+  }
 };
