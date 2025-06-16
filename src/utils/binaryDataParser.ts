@@ -34,8 +34,15 @@ export const parseBinaryData = (
   }
 
   try {
-    // Decode base64
-    const binaryString = atob(binaryText);
+    // Decode base64 with better error handling
+    let binaryString: string;
+    try {
+      binaryString = atob(binaryText);
+    } catch (error) {
+      console.error('Failed to decode base64 data:', error);
+      return { data: [], precision, compression, arrayType };
+    }
+
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
@@ -58,19 +65,22 @@ export const parseBinaryData = (
     
     if (decodedBytes.length >= expectedBytes) {
       const dataView = new DataView(decodedBytes.buffer, decodedBytes.byteOffset);
+      
       for (let i = 0; i < arrayLength; i++) {
         const offset = i * bytesPerFloat;
         try {
+          let value: number;
           if (precision === 64) {
-            const value = dataView.getFloat64(offset, true); // little endian
-            if (!isNaN(value) && isFinite(value)) {
-              data.push(value);
-            }
+            value = dataView.getFloat64(offset, true); // little endian
           } else {
-            const value = dataView.getFloat32(offset, true); // little endian
-            if (!isNaN(value) && isFinite(value)) {
-              data.push(value);
-            }
+            value = dataView.getFloat32(offset, true); // little endian
+          }
+          
+          // Validate the value
+          if (!isNaN(value) && isFinite(value)) {
+            data.push(value);
+          } else {
+            console.warn(`Invalid value at index ${i}: ${value}`);
           }
         } catch (error) {
           console.warn(`Error reading value at offset ${offset}:`, error);
@@ -81,7 +91,6 @@ export const parseBinaryData = (
       console.log(`Successfully parsed ${data.length} values from binary data`);
     } else {
       console.warn(`Binary data length mismatch: expected ${expectedBytes} bytes, got ${decodedBytes.length}`);
-      // Return empty array instead of mock data to signal parsing failure
       return { data: [], precision, compression, arrayType };
     }
 
@@ -133,6 +142,27 @@ export const validatePeakData = (peaks: any[]): boolean => {
     !isNaN(peak.mz) && 
     !isNaN(peak.intensity) &&
     isFinite(peak.mz) && 
-    isFinite(peak.intensity)
+    isFinite(peak.intensity) &&
+    peak.intensity > 0
+  );
+};
+
+// Helper function to validate and filter peak arrays
+export const filterValidPeaks = (peaks: any[]): { mz: number; intensity: number }[] => {
+  if (!Array.isArray(peaks)) {
+    return [];
+  }
+  
+  return peaks.filter(peak => 
+    peak && 
+    typeof peak === 'object' && 
+    typeof peak.mz === 'number' && 
+    typeof peak.intensity === 'number' && 
+    !isNaN(peak.mz) && 
+    !isNaN(peak.intensity) &&
+    isFinite(peak.mz) && 
+    isFinite(peak.intensity) &&
+    peak.intensity > 0 &&
+    peak.mz > 0
   );
 };

@@ -68,6 +68,15 @@ export const detectPeaks = async (
       throw new Error("Invalid data format: expected array of samples");
     }
 
+    // Check if any samples have valid spectra
+    const samplesWithSpectra = data.filter(sample => 
+      sample && Array.isArray(sample.spectra) && sample.spectra.length > 0
+    );
+    
+    if (samplesWithSpectra.length === 0) {
+      throw new Error("No samples with valid spectra found. Please check your uploaded files and ensure they contain proper mass spectrometry data.");
+    }
+
     const allPeaks: Peak[] = [];
     let processedSamples = 0;
     
@@ -89,14 +98,18 @@ export const detectPeaks = async (
         }
 
         try {
-          // Use real peaks from the spectrum instead of detecting new ones
+          // Use real peaks from the spectrum
           const validPeaks = spectrum.peaks.filter(peak => 
             peak && 
             typeof peak.mz === 'number' && 
             typeof peak.intensity === 'number' &&
             peak.intensity >= noise_threshold &&
             !isNaN(peak.mz) && 
-            !isNaN(peak.intensity)
+            !isNaN(peak.intensity) &&
+            isFinite(peak.mz) &&
+            isFinite(peak.intensity) &&
+            peak.mz > 0 &&
+            peak.intensity > 0
           );
           
           const processedPeaks = validPeaks.map(peak => ({
@@ -116,6 +129,10 @@ export const detectPeaks = async (
       
       console.log(`Sample ${sample.fileName}: detected ${samplePeaks} peaks above threshold`);
       processedSamples++;
+    }
+    
+    if (allPeaks.length === 0) {
+      throw new Error(`No peaks found above threshold (${noise_threshold}). Try lowering the noise threshold or check if your files contain valid peak data.`);
     }
     
     // Add small delay for UI responsiveness
@@ -197,6 +214,15 @@ export const alignPeaks = async (
       throw new Error("No valid data provided for peak alignment");
     }
 
+    // Validate that we have detected peaks
+    const samplesWithPeaks = data.filter(sample => 
+      sample && Array.isArray(sample.detectedPeaks) && sample.detectedPeaks.length > 0
+    );
+    
+    if (samplesWithPeaks.length === 0) {
+      throw new Error("No samples with detected peaks found. Please run peak detection first.");
+    }
+
     // Small delay for UI responsiveness
     await new Promise(resolve => setTimeout(resolve, 100));
     
@@ -213,7 +239,8 @@ export const alignPeaks = async (
         .filter(peak => peak && 
                 typeof peak.mz === 'number' && 
                 typeof peak.intensity === 'number' &&
-                typeof peak.retentionTime === 'number')
+                typeof peak.retentionTime === 'number' &&
+                !isNaN(peak.mz) && !isNaN(peak.intensity) && !isNaN(peak.retentionTime))
         .map((peak: Peak) => ({
           ...peak,
           sampleId: sample.fileName || 'unknown'
