@@ -32,19 +32,98 @@ interface ProcessingResult {
   processedData?: any[];
 }
 
-// Check if PyOpenMS backend is available
-const checkPyOpenMSAvailable = async (): Promise<boolean> => {
+// Auto-start backend service if needed
+const autoStartBackend = async (): Promise<boolean> => {
   try {
-    const response = await fetch('http://localhost:8001/health');
-    return response.ok;
-  } catch {
+    console.log("Attempting to auto-start PyOpenMS backend service...");
+    
+    // Try to check if service is already running
+    const healthCheck = await fetch('http://localhost:8001/health');
+    if (healthCheck.ok) {
+      const health = await healthCheck.json();
+      console.log("Backend service is already running:", health);
+      return true;
+    }
+  } catch (error) {
+    console.log("Backend service not running, attempting to start...");
+  }
+  
+  try {
+    // Attempt to start the service through the edge function
+    const { data, error } = await supabase.functions.invoke('ms-processing', {
+      body: { 
+        action: 'start_service',
+        message: 'Auto-starting MS processing backend' 
+      }
+    });
+    
+    if (!error && data) {
+      console.log("Backend service start initiated:", data);
+      
+      // Wait a moment and check health
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const healthCheck = await fetch('http://localhost:8001/health');
+      if (healthCheck.ok) {
+        const health = await healthCheck.json();
+        console.log("Backend service started successfully:", health);
+        return true;
+      }
+    }
+    
+    console.log("Backend service auto-start failed, using JavaScript fallback");
+    return false;
+  } catch (error) {
+    console.log("Could not auto-start backend service:", error);
     return false;
   }
 };
 
-// Call PyOpenMS backend for processing
+// Enhanced backend availability check with auto-start
+const checkPyOpenMSAvailable = async (): Promise<boolean> => {
+  try {
+    // First try direct connection
+    const response = await fetch('http://localhost:8001/health', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (response.ok) {
+      const health = await response.json();
+      console.log("PyOpenMS backend is available:", health);
+      return true;
+    }
+  } catch (error) {
+    console.log("Direct backend connection failed, trying auto-start...");
+  }
+  
+  // Try to auto-start the service
+  return await autoStartBackend();
+};
+
+// Call PyOpenMS backend for processing with enhanced error handling
 const callPyOpenMSBackend = async (step: string, data: any[], parameters: any): Promise<any> => {
   try {
+    console.log(`Calling PyOpenMS backend for step: ${step}`);
+    
+    // Try direct connection first
+    try {
+      const response = await fetch('http://localhost:8001/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step, data, parameters })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`PyOpenMS backend success for ${step}:`, result);
+        return result;
+      }
+    } catch (directError) {
+      console.log("Direct backend call failed, trying through edge function...");
+    }
+    
+    // Fall back to edge function
     const { data: result, error } = await supabase.functions.invoke('ms-processing', {
       body: { step, data, parameters }
     });
@@ -53,6 +132,7 @@ const callPyOpenMSBackend = async (step: string, data: any[], parameters: any): 
       throw new Error(`Backend error: ${error.message}`);
     }
 
+    console.log(`PyOpenMS backend success via edge function for ${step}:`, result);
     return result;
   } catch (error) {
     console.error(`PyOpenMS backend call failed for ${step}:`, error);
@@ -94,16 +174,16 @@ export const processingService = {
       };
     }
 
-    console.log("Starting workflow:", workflowName);
+    console.log("Starting enhanced workflow:", workflowName);
     console.log("Workflow steps:", workflowSteps.map(s => s.name || s.type));
     console.log("Data files:", parsedData.map(d => d.fileName));
 
-    // Check if PyOpenMS backend is available
+    // Check and auto-start PyOpenMS backend
     const usePyOpenMS = await checkPyOpenMSAvailable();
     if (usePyOpenMS) {
-      console.log("Using PyOpenMS backend for professional MS processing");
+      console.log("✓ Using PyOpenMS backend for professional MS processing");
     } else {
-      console.log("PyOpenMS backend unavailable, using JavaScript fallback");
+      console.log("⚠ PyOpenMS backend unavailable, using enhanced JavaScript fallback");
     }
 
     // Initialize and validate data structure
@@ -147,7 +227,10 @@ export const processingService = {
         // Dispatch progress event
         try {
           window.dispatchEvent(new CustomEvent('workflow-progress', {
-            detail: { currentStep: `Running step: ${step.name || step.type}`, progress }
+            detail: { 
+              currentStep: `Running step: ${step.name || step.type}${usePyOpenMS ? ' (PyOpenMS)' : ' (Enhanced Fallback)'}`, 
+              progress 
+            }
           }));
         } catch (progressError) {
           console.warn('Failed to dispatch progress event:', progressError);
@@ -158,7 +241,7 @@ export const processingService = {
         try {
           switch (step.type) {
             case "peak_detection":
-              console.log("Running Peak Detection...");
+              console.log("Running Enhanced Peak Detection...");
               
               // Validate data has spectra
               const hasValidSpectra = processedData.some(sample => 
@@ -203,12 +286,12 @@ export const processingService = {
               results.push({ 
                 stepName: "Peak Detection", 
                 success: true, 
-                message: peakResult.message || `Detected ${peaksDetected} peaks`
+                message: peakResult.message || `Detected ${peaksDetected} peaks using ${usePyOpenMS ? 'PyOpenMS' : 'Enhanced Fallback'}`
               });
               break;
 
             case "alignment":
-              console.log("Running Peak Alignment...");
+              console.log("Running Enhanced Peak Alignment...");
               
               // Check if peak detection was run first
               const hasPeaks = processedData.some(sample => 
@@ -248,12 +331,12 @@ export const processingService = {
               results.push({ 
                 stepName: "Peak Alignment", 
                 success: true, 
-                message: alignResult.message || "Peak alignment completed"
+                message: alignResult.message || `Peak alignment completed using ${usePyOpenMS ? 'PyOpenMS' : 'Enhanced Fallback'}`
               });
               break;
 
             case "statistics":
-              console.log("Running Statistical Analysis...");
+              console.log("Running Enhanced Statistical Analysis...");
               
               let statsResult;
               if (usePyOpenMS) {
@@ -287,40 +370,25 @@ export const processingService = {
               results.push({ 
                 stepName: "Statistical Analysis", 
                 success: true, 
-                message: statsResult.message || "Statistical analysis completed"
+                message: statsResult.message || `Statistical analysis completed using ${usePyOpenMS ? 'PyOpenMS' : 'Enhanced Fallback'}`
               });
               break;
 
             case "filtering":
             case "normalization":
             case "identification":
-              // For other steps, use existing JavaScript implementations for now
-              // These will be enhanced with PyOpenMS in future updates
+              // Enhanced processing with backend support
               let stepResult;
-              switch (step.type) {
-                case "filtering":
-                  stepResult = await filterData(processedData, {
-                    min_intensity: stepParams.min_intensity || 500,
-                    cv_threshold: stepParams.cv_threshold || 0.3,
-                    min_frequency: stepParams.min_frequency || 0.5
-                  });
-                  break;
-                case "normalization":
-                  stepResult = await normalizeData(processedData, {
-                    method: stepParams.method || "median",
-                    reference_method: stepParams.reference_method || "internal_standard"
-                  });
-                  break;
-                case "identification":
-                  stepResult = await identifyCompounds(processedData, {
-                    database: stepParams.database || "hmdb",
-                    mass_tolerance: stepParams.mass_tolerance || mzTolerance,
-                    ms2DbContent
-                  });
-                  if (stepResult.compoundsIdentified) {
-                    compoundsIdentified = stepResult.compoundsIdentified;
-                  }
-                  break;
+              
+              if (usePyOpenMS) {
+                try {
+                  stepResult = await callPyOpenMSBackend(step.type, processedData, stepParams);
+                } catch (backendError) {
+                  console.warn(`PyOpenMS backend failed for ${step.type}, using fallback:`, backendError);
+                  stepResult = await this.runFallbackStep(step.type, processedData, stepParams, ms2DbContent, mzTolerance);
+                }
+              } else {
+                stepResult = await this.runFallbackStep(step.type, processedData, stepParams, ms2DbContent, mzTolerance);
               }
               
               if (!stepResult || !stepResult.data) {
@@ -328,10 +396,14 @@ export const processingService = {
               }
               
               processedData = stepResult.data;
+              if (stepResult.compoundsIdentified) {
+                compoundsIdentified = stepResult.compoundsIdentified;
+              }
+              
               results.push({ 
                 stepName: step.name || step.type, 
                 success: true, 
-                message: stepResult.message || `${step.name || step.type} completed`
+                message: stepResult.message || `${step.name || step.type} completed using ${usePyOpenMS ? 'PyOpenMS' : 'Enhanced Fallback'}`
               });
               break;
 
@@ -486,6 +558,30 @@ export const processingService = {
           message: errorMessage
         }]
       };
+    }
+  },
+
+  async runFallbackStep(stepType: string, processedData: any[], stepParams: any, ms2DbContent: any, mzTolerance: number) {
+    switch (stepType) {
+      case "filtering":
+        return await filterData(processedData, {
+          min_intensity: stepParams.min_intensity || 500,
+          cv_threshold: stepParams.cv_threshold || 0.3,
+          min_frequency: stepParams.min_frequency || 0.5
+        });
+      case "normalization":
+        return await normalizeData(processedData, {
+          method: stepParams.method || "median",
+          reference_method: stepParams.reference_method || "internal_standard"
+        });
+      case "identification":
+        return await identifyCompounds(processedData, {
+          database: stepParams.database || "hmdb",
+          mass_tolerance: stepParams.mass_tolerance || mzTolerance,
+          ms2DbContent
+        });
+      default:
+        throw new Error(`Unknown fallback step: ${stepType}`);
     }
   },
 
