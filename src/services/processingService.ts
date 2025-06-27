@@ -1,3 +1,4 @@
+
 import { 
   detectPeaks, 
   alignPeaks, 
@@ -32,111 +33,106 @@ interface ProcessingResult {
   processedData?: any[];
 }
 
-// Auto-start backend service if needed
-const autoStartBackend = async (): Promise<boolean> => {
-  try {
-    console.log("Attempting to auto-start PyOpenMS backend service...");
-    
-    // Try to check if service is already running
-    const healthCheck = await fetch('http://localhost:8001/health');
-    if (healthCheck.ok) {
-      const health = await healthCheck.json();
-      console.log("Backend service is already running:", health);
-      return true;
-    }
-  } catch (error) {
-    console.log("Backend service not running, attempting to start...");
-  }
-  
-  try {
-    // Attempt to start the service through the edge function
-    const { data, error } = await supabase.functions.invoke('ms-processing', {
-      body: { 
-        action: 'start_service',
-        message: 'Auto-starting MS processing backend' 
-      }
-    });
-    
-    if (!error && data) {
-      console.log("Backend service start initiated:", data);
-      
-      // Wait a moment and check health
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      const healthCheck = await fetch('http://localhost:8001/health');
-      if (healthCheck.ok) {
-        const health = await healthCheck.json();
-        console.log("Backend service started successfully:", health);
-        return true;
-      }
-    }
-    
-    console.log("Backend service auto-start failed, using JavaScript fallback");
-    return false;
-  } catch (error) {
-    console.log("Could not auto-start backend service:", error);
-    return false;
-  }
-};
-
-// Enhanced backend availability check with auto-start
+// Check if PyOpenMS backend is available with better error handling
 const checkPyOpenMSAvailable = async (): Promise<boolean> => {
   try {
-    // First try direct connection
+    console.log("Checking PyOpenMS backend availability...");
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
     const response = await fetch('http://localhost:8001/health', {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal
     });
+    
+    clearTimeout(timeoutId);
     
     if (response.ok) {
       const health = await response.json();
-      console.log("PyOpenMS backend is available:", health);
+      console.log("✓ PyOpenMS backend is available:", health);
       return true;
+    } else {
+      console.log("PyOpenMS backend responded with error:", response.status);
+      return false;
     }
   } catch (error) {
-    console.log("Direct backend connection failed, trying auto-start...");
+    if (error.name === 'AbortError') {
+      console.log("PyOpenMS backend health check timed out");
+    } else {
+      console.log("PyOpenMS backend connection failed:", error.message);
+    }
+    return false;
   }
-  
-  // Try to auto-start the service
-  return await autoStartBackend();
 };
 
-// Call PyOpenMS backend for processing with enhanced error handling
+// Call PyOpenMS backend with improved error handling and validation
 const callPyOpenMSBackend = async (step: string, data: any[], parameters: any): Promise<any> => {
+  if (!step) {
+    throw new Error("Step parameter is required");
+  }
+  
+  if (!data || !Array.isArray(data)) {
+    throw new Error("Data parameter must be a valid array");
+  }
+
+  console.log(`Calling PyOpenMS backend for step: ${step} with ${data.length} samples`);
+  
   try {
-    console.log(`Calling PyOpenMS backend for step: ${step}`);
+    // Try direct connection first with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
     
-    // Try direct connection first
-    try {
-      const response = await fetch('http://localhost:8001/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ step, data, parameters })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        console.log(`PyOpenMS backend success for ${step}:`, result);
-        return result;
-      }
-    } catch (directError) {
-      console.log("Direct backend call failed, trying through edge function...");
-    }
+    const requestBody = { 
+      step: step,
+      data: data, 
+      parameters: parameters || {} 
+    };
     
-    // Fall back to edge function
-    const { data: result, error } = await supabase.functions.invoke('ms-processing', {
-      body: { step, data, parameters }
+    console.log("Request payload:", { step, dataCount: data.length, parameters });
+    
+    const response = await fetch('http://localhost:8001/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
     });
-
-    if (error) {
-      throw new Error(`Backend error: ${error.message}`);
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Backend responded with ${response.status}: ${errorText}`);
     }
-
-    console.log(`PyOpenMS backend success via edge function for ${step}:`, result);
+    
+    const result = await response.json();
+    console.log(`✓ PyOpenMS backend success for ${step}:`, result);
     return result;
-  } catch (error) {
-    console.error(`PyOpenMS backend call failed for ${step}:`, error);
-    throw error;
+    
+  } catch (directError) {
+    console.log("Direct backend call failed, trying through edge function...", directError.message);
+    
+    // Fallback to edge function
+    try {
+      const { data: result, error } = await supabase.functions.invoke('ms-processing', {
+        body: { 
+          step: step, 
+          data: data, 
+          parameters: parameters || {} 
+        }
+      });
+
+      if (error) {
+        throw new Error(`Edge function error: ${error.message}`);
+      }
+
+      console.log(`✓ PyOpenMS backend success via edge function for ${step}:`, result);
+      return result;
+    } catch (edgeError) {
+      console.error(`Both direct and edge function calls failed for ${step}:`, edgeError);
+      throw new Error(`Backend processing failed: ${edgeError.message}`);
+    }
   }
 };
 
@@ -175,10 +171,10 @@ export const processingService = {
     }
 
     console.log("Starting enhanced workflow:", workflowName);
-    console.log("Workflow steps:", workflowSteps.map(s => s.name || s.type));
+    console.log("Workflow steps:", workflowSteps.map(s => ({ name: s.name || s.type, type: s.type })));
     console.log("Data files:", parsedData.map(d => d.fileName));
 
-    // Check and auto-start PyOpenMS backend
+    // Check PyOpenMS backend availability
     const usePyOpenMS = await checkPyOpenMSAvailable();
     if (usePyOpenMS) {
       console.log("✓ Using PyOpenMS backend for professional MS processing");
@@ -187,35 +183,26 @@ export const processingService = {
     }
 
     // Initialize and validate data structure
-    let processedData = parsedData.map(sample => {
-      // Ensure all required properties exist with proper defaults
-      const validatedSample = {
-        ...sample,
-        fileName: sample.fileName || 'unknown',
-        totalSpectra: sample.totalSpectra || 0,
-        spectra: Array.isArray(sample.spectra) ? sample.spectra : [],
-        chromatograms: Array.isArray(sample.chromatograms) ? sample.chromatograms : [],
-        // Initialize processing results containers
-        detectedPeaks: [],
-        alignedPeaks: [],
-        filteredPeaks: [],
-        normalizedPeaks: [],
-        identifiedCompounds: [],
-        statisticalResults: null,
-        processingStatus: 'processing'
-      };
-
-      // Validate spectra structure
-      validatedSample.spectra = validatedSample.spectra.map(spectrum => ({
+    let processedData = parsedData.map(sample => ({
+      ...sample,
+      fileName: sample.fileName || 'unknown',
+      totalSpectra: sample.totalSpectra || 0,
+      spectra: Array.isArray(sample.spectra) ? sample.spectra.map(spectrum => ({
         ...spectrum,
         peaks: Array.isArray(spectrum.peaks) ? spectrum.peaks : [],
         retentionTime: typeof spectrum.retentionTime === 'number' ? spectrum.retentionTime : 0,
         scanNumber: typeof spectrum.scanNumber === 'number' ? spectrum.scanNumber : 0,
         msLevel: typeof spectrum.msLevel === 'number' ? spectrum.msLevel : 1
-      }));
-
-      return validatedSample;
-    });
+      })) : [],
+      chromatograms: Array.isArray(sample.chromatograms) ? sample.chromatograms : [],
+      detectedPeaks: [],
+      alignedPeaks: [],
+      filteredPeaks: [],
+      normalizedPeaks: [],
+      identifiedCompounds: [],
+      statisticalResults: null,
+      processingStatus: 'processing'
+    }));
 
     try {
       for (let i = 0; i < workflowSteps.length; i++) {
@@ -262,7 +249,7 @@ export const processingService = {
                     max_peak_width: stepParams.max_peak_width || 2.0
                   });
                 } catch (backendError) {
-                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError);
+                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError.message);
                   peakResult = await detectPeaks(processedData, {
                     noise_threshold: stepParams.noise_threshold || 1000,
                     min_peak_width: stepParams.min_peak_width || 0.1,
@@ -293,7 +280,6 @@ export const processingService = {
             case "alignment":
               console.log("Running Enhanced Peak Alignment...");
               
-              // Check if peak detection was run first
               const hasPeaks = processedData.some(sample => 
                 sample.detectedPeaks && sample.detectedPeaks.length > 0
               );
@@ -310,7 +296,7 @@ export const processingService = {
                     rt_tolerance: stepParams.rt_tolerance || 0.5
                   });
                 } catch (backendError) {
-                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError);
+                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError.message);
                   alignResult = await alignPeaks(processedData, {
                     mz_tolerance: stepParams.mz_tolerance || 0.01,
                     rt_tolerance: stepParams.rt_tolerance || 0.5
@@ -347,7 +333,7 @@ export const processingService = {
                     fold_change_threshold: stepParams.fold_change_threshold || 1.5
                   });
                 } catch (backendError) {
-                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError);
+                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError.message);
                   statsResult = await performStatistics(processedData, {
                     test_type: stepParams.test_type || "t_test",
                     p_value_threshold: stepParams.p_value_threshold || 0.05,
@@ -377,14 +363,13 @@ export const processingService = {
             case "filtering":
             case "normalization":
             case "identification":
-              // Enhanced processing with backend support
               let stepResult;
               
               if (usePyOpenMS) {
                 try {
                   stepResult = await callPyOpenMSBackend(step.type, processedData, stepParams);
                 } catch (backendError) {
-                  console.warn(`PyOpenMS backend failed for ${step.type}, using fallback:`, backendError);
+                  console.warn(`PyOpenMS backend failed for ${step.type}, using fallback:`, backendError.message);
                   stepResult = await this.runFallbackStep(step.type, processedData, stepParams, ms2DbContent, mzTolerance);
                 }
               } else {
@@ -429,7 +414,6 @@ export const processingService = {
             message: errorMessage
           });
           
-          // Continue with next step but mark as having failures
           console.log(`Continuing workflow after error in ${step.name || step.type}`);
         }
       }
@@ -437,7 +421,6 @@ export const processingService = {
       const endTime = performance.now();
       const processingTime = ((endTime - startTime) / 1000).toFixed(2);
 
-      // Mark all samples as completed
       processedData = processedData.map(sample => ({
         ...sample,
         processingStatus: 'completed'
@@ -460,7 +443,6 @@ export const processingService = {
 
       // Enhanced storage with quota handling
       try {
-        // Create a lightweight summary for storage
         const lightweightSummary = {
           workflowName,
           date: new Date().toISOString(),
@@ -473,7 +455,6 @@ export const processingService = {
           sampleNames: processedData.map(s => s.fileName)
         };
 
-        // Try to store the full result first
         try {
           const fullAnalysis = {
             ...lightweightSummary,
@@ -497,7 +478,6 @@ export const processingService = {
         } catch (quotaError) {
           console.warn('Storage quota exceeded, saving lightweight summary:', quotaError);
           
-          // Fallback: Store only lightweight summary
           let lightweightAnalyses = [];
           try {
             const existing = localStorage.getItem('myAnalysesLight');
@@ -508,14 +488,12 @@ export const processingService = {
           
           lightweightAnalyses.push(lightweightSummary);
           
-          // Keep only last 10 analyses to save space
           if (lightweightAnalyses.length > 10) {
             lightweightAnalyses = lightweightAnalyses.slice(-10);
           }
           
           localStorage.setItem('myAnalysesLight', JSON.stringify(lightweightAnalyses));
           
-          // Store lightweight result for immediate access
           const lightweightResult = {
             success: !hasFailures,
             processed: true,
@@ -523,8 +501,8 @@ export const processingService = {
             results,
             processedData: processedData.map(sample => ({
               fileName: sample.fileName,
-              detectedPeaks: sample.detectedPeaks ? sample.detectedPeaks.slice(0, 100) : [], // Keep only first 100 peaks
-              identifiedCompounds: sample.identifiedCompounds ? sample.identifiedCompounds.slice(0, 50) : [], // Keep only first 50 compounds
+              detectedPeaks: sample.detectedPeaks ? sample.detectedPeaks.slice(0, 100) : [],
+              identifiedCompounds: sample.identifiedCompounds ? sample.identifiedCompounds.slice(0, 50) : [],
               processingStatus: sample.processingStatus,
               totalSpectra: sample.totalSpectra
             }))
@@ -536,7 +514,6 @@ export const processingService = {
         
       } catch (storageError) {
         console.error('Failed to store any analysis results:', storageError);
-        // Even if storage fails, we still return the result for immediate use
       }
 
       return finalResult;
@@ -587,7 +564,6 @@ export const processingService = {
 
   getLastResult(): any | null {
     try {
-      // First try to get from the direct storage
       const lastResult = localStorage.getItem('lastProcessingResult');
       if (lastResult) {
         const parsed = JSON.parse(lastResult);
@@ -595,7 +571,6 @@ export const processingService = {
         return parsed;
       }
 
-      // Fallback to getting from full analyses
       try {
         const allAnalyses = JSON.parse(localStorage.getItem('myAnalyses') || '[]');
         if (allAnalyses.length > 0) {
@@ -614,7 +589,6 @@ export const processingService = {
         console.warn('Failed to load from full analyses, trying lightweight:', error);
       }
 
-      // Fallback to lightweight analyses
       try {
         const lightAnalyses = JSON.parse(localStorage.getItem('myAnalysesLight') || '[]');
         if (lightAnalyses.length > 0) {
