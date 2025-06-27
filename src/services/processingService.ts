@@ -6,6 +6,7 @@ import {
   identifyCompounds, 
   performStatistics 
 } from '@/utils/dataProcessing';
+import { supabase } from '@/integrations/supabase/client';
 
 interface WorkflowOptions {
   workflowName?: string;
@@ -30,6 +31,34 @@ interface ProcessingResult {
   }>;
   processedData?: any[];
 }
+
+// Check if PyOpenMS backend is available
+const checkPyOpenMSAvailable = async (): Promise<boolean> => {
+  try {
+    const response = await fetch('http://localhost:8001/health');
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+// Call PyOpenMS backend for processing
+const callPyOpenMSBackend = async (step: string, data: any[], parameters: any): Promise<any> => {
+  try {
+    const { data: result, error } = await supabase.functions.invoke('ms-processing', {
+      body: { step, data, parameters }
+    });
+
+    if (error) {
+      throw new Error(`Backend error: ${error.message}`);
+    }
+
+    return result;
+  } catch (error) {
+    console.error(`PyOpenMS backend call failed for ${step}:`, error);
+    throw error;
+  }
+};
 
 export const processingService = {
   async processWorkflow(
@@ -68,6 +97,14 @@ export const processingService = {
     console.log("Starting workflow:", workflowName);
     console.log("Workflow steps:", workflowSteps.map(s => s.name || s.type));
     console.log("Data files:", parsedData.map(d => d.fileName));
+
+    // Check if PyOpenMS backend is available
+    const usePyOpenMS = await checkPyOpenMSAvailable();
+    if (usePyOpenMS) {
+      console.log("Using PyOpenMS backend for professional MS processing");
+    } else {
+      console.log("PyOpenMS backend unavailable, using JavaScript fallback");
+    }
 
     // Initialize and validate data structure
     let processedData = parsedData.map(sample => {
@@ -116,7 +153,6 @@ export const processingService = {
           console.warn('Failed to dispatch progress event:', progressError);
         }
 
-        // Validate step parameters
         const stepParams = step.parameters || {};
         
         try {
@@ -134,11 +170,29 @@ export const processingService = {
                 throw new Error("No valid spectra data found for peak detection");
               }
               
-              const peakResult = await detectPeaks(processedData, {
-                noise_threshold: stepParams.noise_threshold || 1000,
-                min_peak_width: stepParams.min_peak_width || 0.1,
-                max_peak_width: stepParams.max_peak_width || 2.0
-              });
+              let peakResult;
+              if (usePyOpenMS) {
+                try {
+                  peakResult = await callPyOpenMSBackend('peak_detection', processedData, {
+                    noise_threshold: stepParams.noise_threshold || 1000,
+                    min_peak_width: stepParams.min_peak_width || 0.1,
+                    max_peak_width: stepParams.max_peak_width || 2.0
+                  });
+                } catch (backendError) {
+                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError);
+                  peakResult = await detectPeaks(processedData, {
+                    noise_threshold: stepParams.noise_threshold || 1000,
+                    min_peak_width: stepParams.min_peak_width || 0.1,
+                    max_peak_width: stepParams.max_peak_width || 2.0
+                  });
+                }
+              } else {
+                peakResult = await detectPeaks(processedData, {
+                  noise_threshold: stepParams.noise_threshold || 1000,
+                  min_peak_width: stepParams.min_peak_width || 0.1,
+                  max_peak_width: stepParams.max_peak_width || 2.0
+                });
+              }
               
               if (!peakResult || !peakResult.data) {
                 throw new Error("Peak detection returned invalid data");
@@ -149,7 +203,7 @@ export const processingService = {
               results.push({ 
                 stepName: "Peak Detection", 
                 success: true, 
-                message: `Detected ${peaksDetected} peaks`
+                message: peakResult.message || `Detected ${peaksDetected} peaks`
               });
               break;
 
@@ -165,10 +219,26 @@ export const processingService = {
                 throw new Error("No detected peaks found. Run peak detection first.");
               }
               
-              const alignResult = await alignPeaks(processedData, {
-                mz_tolerance: stepParams.mz_tolerance || 0.01,
-                rt_tolerance: stepParams.rt_tolerance || 0.5
-              });
+              let alignResult;
+              if (usePyOpenMS) {
+                try {
+                  alignResult = await callPyOpenMSBackend('alignment', processedData, {
+                    mz_tolerance: stepParams.mz_tolerance || 0.01,
+                    rt_tolerance: stepParams.rt_tolerance || 0.5
+                  });
+                } catch (backendError) {
+                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError);
+                  alignResult = await alignPeaks(processedData, {
+                    mz_tolerance: stepParams.mz_tolerance || 0.01,
+                    rt_tolerance: stepParams.rt_tolerance || 0.5
+                  });
+                }
+              } else {
+                alignResult = await alignPeaks(processedData, {
+                  mz_tolerance: stepParams.mz_tolerance || 0.01,
+                  rt_tolerance: stepParams.rt_tolerance || 0.5
+                });
+              }
               
               if (!alignResult || !alignResult.data) {
                 throw new Error("Peak alignment returned invalid data");
@@ -182,77 +252,32 @@ export const processingService = {
               });
               break;
 
-            case "filtering":
-              console.log("Running Data Filtering...");
-              
-              const filterResult = await filterData(processedData, {
-                min_intensity: stepParams.min_intensity || 500,
-                cv_threshold: stepParams.cv_threshold || 0.3,
-                min_frequency: stepParams.min_frequency || 0.5
-              });
-              
-              if (!filterResult || !filterResult.data) {
-                throw new Error("Data filtering returned invalid data");
-              }
-              
-              processedData = filterResult.data;
-              results.push({ 
-                stepName: "Data Filtering", 
-                success: true, 
-                message: filterResult.message || "Data filtering completed"
-              });
-              break;
-
-            case "normalization":
-              console.log("Running Data Normalization...");
-              
-              const normalizeResult = await normalizeData(processedData, {
-                method: stepParams.method || "median",
-                reference_method: stepParams.reference_method || "internal_standard"
-              });
-              
-              if (!normalizeResult || !normalizeResult.data) {
-                throw new Error("Data normalization returned invalid data");
-              }
-              
-              processedData = normalizeResult.data;
-              results.push({ 
-                stepName: "Data Normalization", 
-                success: true, 
-                message: normalizeResult.message || "Data normalization completed"
-              });
-              break;
-
-            case "identification":
-              console.log("Running Compound Identification...");
-              
-              const identifyResult = await identifyCompounds(processedData, {
-                database: stepParams.database || "hmdb",
-                mass_tolerance: stepParams.mass_tolerance || mzTolerance,
-                ms2DbContent
-              });
-              
-              if (!identifyResult || !identifyResult.data) {
-                throw new Error("Compound identification returned invalid data");
-              }
-              
-              processedData = identifyResult.data;
-              compoundsIdentified = identifyResult.compoundsIdentified || 0;
-              results.push({ 
-                stepName: "Compound Identification", 
-                success: true, 
-                message: `Identified ${compoundsIdentified} compounds`
-              });
-              break;
-
             case "statistics":
               console.log("Running Statistical Analysis...");
               
-              const statsResult = await performStatistics(processedData, {
-                test_type: stepParams.test_type || "t_test",
-                p_value_threshold: stepParams.p_value_threshold || 0.05,
-                fold_change_threshold: stepParams.fold_change_threshold || 1.5
-              });
+              let statsResult;
+              if (usePyOpenMS) {
+                try {
+                  statsResult = await callPyOpenMSBackend('statistics', processedData, {
+                    test_type: stepParams.test_type || "t_test",
+                    p_value_threshold: stepParams.p_value_threshold || 0.05,
+                    fold_change_threshold: stepParams.fold_change_threshold || 1.5
+                  });
+                } catch (backendError) {
+                  console.warn("PyOpenMS backend failed, falling back to JavaScript:", backendError);
+                  statsResult = await performStatistics(processedData, {
+                    test_type: stepParams.test_type || "t_test",
+                    p_value_threshold: stepParams.p_value_threshold || 0.05,
+                    fold_change_threshold: stepParams.fold_change_threshold || 1.5
+                  });
+                }
+              } else {
+                statsResult = await performStatistics(processedData, {
+                  test_type: stepParams.test_type || "t_test",
+                  p_value_threshold: stepParams.p_value_threshold || 0.05,
+                  fold_change_threshold: stepParams.fold_change_threshold || 1.5
+                });
+              }
               
               if (!statsResult || !statsResult.data) {
                 throw new Error("Statistical analysis returned invalid data");
@@ -263,6 +288,50 @@ export const processingService = {
                 stepName: "Statistical Analysis", 
                 success: true, 
                 message: statsResult.message || "Statistical analysis completed"
+              });
+              break;
+
+            case "filtering":
+            case "normalization":
+            case "identification":
+              // For other steps, use existing JavaScript implementations for now
+              // These will be enhanced with PyOpenMS in future updates
+              let stepResult;
+              switch (step.type) {
+                case "filtering":
+                  stepResult = await filterData(processedData, {
+                    min_intensity: stepParams.min_intensity || 500,
+                    cv_threshold: stepParams.cv_threshold || 0.3,
+                    min_frequency: stepParams.min_frequency || 0.5
+                  });
+                  break;
+                case "normalization":
+                  stepResult = await normalizeData(processedData, {
+                    method: stepParams.method || "median",
+                    reference_method: stepParams.reference_method || "internal_standard"
+                  });
+                  break;
+                case "identification":
+                  stepResult = await identifyCompounds(processedData, {
+                    database: stepParams.database || "hmdb",
+                    mass_tolerance: stepParams.mass_tolerance || mzTolerance,
+                    ms2DbContent
+                  });
+                  if (stepResult.compoundsIdentified) {
+                    compoundsIdentified = stepResult.compoundsIdentified;
+                  }
+                  break;
+              }
+              
+              if (!stepResult || !stepResult.data) {
+                throw new Error(`${step.name || step.type} returned invalid data`);
+              }
+              
+              processedData = stepResult.data;
+              results.push({ 
+                stepName: step.name || step.type, 
+                success: true, 
+                message: stepResult.message || `${step.name || step.type} completed`
               });
               break;
 

@@ -1,1 +1,127 @@
+
 project_id = "soonsgomaxnbturfhwea"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+port = 54324
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://localhost:3000"]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_users = false
+
+[auth.external.apple]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.azure]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.bitbucket]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.discord]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.facebook]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.github]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.gitlab]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.google]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.linkedin]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.notion]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.spotify]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.slack]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.twitch]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.twitter]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.workos]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[auth.external.zoom]
+enabled = false
+client_id = ""
+secret = ""
+redirect_uri = ""
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[functions.ms-processing]
+verify_jwt = true
+
+[storage]
+enabled = true
+port = 54323
+file_size_limit = "50MiB"
